@@ -28,9 +28,9 @@ This is not a general app repo. Most behavior lives in shell scripts plus static
 - `profiles/*.conf`
   - `nfqws` profiles. Only `profiles/default.conf` exists in the current tree.
 - `lists/`
-  - Static host/IP lists shipped with the module.
+  - Static hostlists shipped with the module. In the current tree, only active runtime lists remain.
 - `payloads/*.bin`
-  - Binary fake TLS/QUIC/STUN payloads referenced by profiles.
+  - Binary fake TLS/QUIC payloads referenced by profiles.
 - `bin/nfqws-*`
   - Architecture-specific binaries. `customize.sh` renames the selected one to `bin/nfqws` at install time.
 - `webroot/`
@@ -64,7 +64,7 @@ This is not a general app repo. Most behavior lives in shell scripts plus static
   - Renaming the module ID or install path is a coordinated change, not a one-file edit.
 
 - `system/bin/nzapret` owns all network-facing update logic.
-  - Manual list/IPSet refreshes and manual version checks live in the CLI.
+  - Manual list refreshes live in the CLI.
   - `service.sh` should stay local-only at boot and manual start time.
 
 - Profiles are both parsed and passed through.
@@ -81,7 +81,6 @@ This is not a general app repo. Most behavior lives in shell scripts plus static
     - `rules_v4`
     - `rules_v6`
     - `domain_count`
-    - `ipset_count`
     - `profile`
     - `profile_label`
   - If you change that JSON schema, update the WebUI in the same change.
@@ -96,9 +95,9 @@ This is not a general app repo. Most behavior lives in shell scripts plus static
 
 ## Current Reality And Traps
 
-- The current checkout is not a git repository.
-  - There is no `.git/` directory here.
-  - Do not assume `git status`, `git diff`, or branch-based workflows are available.
+- The current checkout is a git repository.
+  - Use ordinary non-destructive git workflows.
+  - Avoid rewriting or reverting user work unless explicitly requested.
 
 - `build.sh` stages the module from the repository root.
   - It copies the known module files and directories into a temporary staging directory.
@@ -110,12 +109,9 @@ This is not a general app repo. Most behavior lives in shell scripts plus static
   - `game-filter`, `auto-update`, and source-editing were removed from the CLI and WebUI.
   - Keep new controls tightly coupled to actual Android runtime behavior.
 
-- `ipset-all.txt` and the exclude/user list files are not part of the active runtime path today.
-  - `system/bin/nzapret` updates, counts, and diagnoses `lists/ipset-all.txt`.
-  - `service.sh` creates `list-general-user.txt`, `list-exclude-user.txt`, and `ipset-exclude-user.txt` placeholders.
-  - The shipped `profiles/default.conf` only references `list-general.txt` and `list-google.txt`.
-  - Current `service.sh` logic does not consume `ipset-all.txt`, `list-exclude.txt`, `ipset-exclude.txt`, or the `*-user.txt` files when building firewall state.
-  - Treat those files as partially integrated unless you explicitly wire them into runtime behavior.
+- The Android module is intentionally hostlist-first.
+  - The shipped `profiles/default.conf` only references `list-general.txt`, `list-google.txt`, and the two default fake payloads.
+  - Keep new features aligned with the active hostlist-based Android runtime path.
 
 ## Editing Guidance
 
@@ -143,15 +139,15 @@ This is not a general app repo. Most behavior lives in shell scripts plus static
 ### WebUI Changes
 
 - The UI shells out through `ksu.exec`, so command strings must stay shell-safe.
-- Keep CLI outputs stable when possible; the UI polls status every 5 seconds and log output every 3 seconds when expanded.
+- Keep CLI outputs stable when possible; the UI polls status every 5 seconds and polls `nzapret.log` every 3 seconds only while the runtime log tab is active.
 - Prefer runtime control and diagnostics over configuration-heavy settings panels.
 - Do not add UI toggles unless they map to real behavior in `service.sh` or the active profile.
 
 ### List And Source Changes
 
 - Manual updates are CLI-owned.
-  - `system/bin/nzapret update ...` downloads and refreshes `list-general.txt` and `ipset-all.txt`.
-  - `service.sh` does not download lists or perform version checks at boot.
+  - `system/bin/nzapret update ...` downloads and refreshes `list-general.txt`.
+  - `service.sh` does not download lists at boot.
 - If you change default source URLs or appended domains, update `system/bin/nzapret`.
 
 ### Packaging Changes

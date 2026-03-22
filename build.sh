@@ -102,10 +102,9 @@ fi
 echo "[*] Removing runtime artifacts from staging tree..."
 rm -f \
     "$STAGE_DIR/.list_count" \
-    "$STAGE_DIR/.ipset_count" \
-    "$STAGE_DIR/.debug_monitor.pid" \
     "$STAGE_DIR/nzapret.log" \
-    "$STAGE_DIR/nzapret.log.prev"
+    "$STAGE_DIR/nzapret.log.prev" \
+    "$STAGE_DIR/nzapret-events.log"
 
 echo "[*] Setting execution permissions..."
 chmod +x "$STAGE_DIR/action.sh" 2>/dev/null || true
@@ -125,10 +124,9 @@ cd "$STAGE_DIR"
 zip -r9 "$ZIP_PATH" . \
     -x "*.git*" \
     -x ".list_count" \
-    -x ".ipset_count" \
-    -x ".debug_monitor.pid" \
     -x "nzapret.log" \
     -x "nzapret.log.prev" \
+    -x "nzapret-events.log" \
     -x "*.tmp" \
     -x "Thumbs.db" \
     -x ".DS_Store"

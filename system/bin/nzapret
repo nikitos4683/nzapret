@@ -10,14 +10,12 @@ PAYLOADS="$MODDIR/payloads"
 BIN="$MODDIR/bin/nfqws"
 CHAIN="nzapret_out"
 LOGFILE="$MODDIR/nzapret.log"
+EVENTLOG="$MODDIR/nzapret-events.log"
 UTILS="$MODDIR/utils"
 ACTIVE_PROFILE_FILE="$UTILS/profile.current"
 PROFILE_DIR="$MODDIR/profiles"
 DEFAULT_PROFILE="default"
 DEFAULT_LIST_SOURCE="https://raw.githubusercontent.com/bol-van/rulist/refs/heads/main/reestr_hostname.txt"
-DEFAULT_IPSET_SOURCE="https://raw.githubusercontent.com/bol-van/rulist/refs/heads/main/reestr_smart4.txt"
-VERSION_URL="https://raw.githubusercontent.com/nikitos4683/nzapret/refs/heads/main/.service/version.txt"
-RELEASES_URL="https://github.com/nikitos4683/nzapret/releases/latest"
 
 # Domains always appended after a manual list refresh.
 ALWAYS_INCLUDE_DOMAINS="encryptedsni.com adblockplus.org"
@@ -25,6 +23,12 @@ ALWAYS_INCLUDE_DOMAINS="encryptedsni.com adblockplus.org"
 # Helpers
 ensure_utils_dir() {
     mkdir -p "$UTILS" >/dev/null 2>&1
+}
+
+log_event() {
+    _etype="$1"; shift
+    _ets=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "----")
+    printf '%s %-8s %s\n' "$_ets" "$_etype" "$*" >> "$EVENTLOG"
 }
 
 require_cmd() {
@@ -52,11 +56,6 @@ get_version() {
     if [ -f "$MODDIR/module.prop" ]; then
         grep '^version=' "$MODDIR/module.prop" | cut -d= -f2 | tr -d '\r\n'
     fi
-}
-
-# Normalize version string: strip leading 'v' and whitespace.
-normalize_version() {
-    printf '%s' "$1" | tr -d '[:space:]' | sed 's/^v//'
 }
 
 # Profiles
@@ -139,7 +138,6 @@ get_list_count() {
 
 refresh_counts() {
     get_list_count "$MODDIR/.list_count" "$LISTS/list-general.txt" 1 >/dev/null
-    get_list_count "$MODDIR/.ipset_count" "$LISTS/ipset-all.txt" 1 >/dev/null
 }
 
 # Status printers
@@ -161,7 +159,6 @@ print_status_human() {
     _rules=$(get_rule_count iptables)
     _rules6=$(get_rule_count ip6tables)
     _lc=$(get_list_count "$MODDIR/.list_count" "$LISTS/list-general.txt")
-    _ic=$(get_list_count "$MODDIR/.ipset_count" "$LISTS/ipset-all.txt")
 
     [ -n "$_ver" ] && echo "Module version: $_ver"
 
@@ -181,12 +178,6 @@ print_status_human() {
     else
         echo "list-general.txt: MISSING"
     fi
-
-    if [ -f "$LISTS/ipset-all.txt" ]; then
-        echo "ipset-all.txt: $_ic entries"
-    else
-        echo "ipset-all.txt: MISSING"
-    fi
 }
 
 print_status_json() {
@@ -202,12 +193,11 @@ print_status_json() {
     _rules=$(get_rule_count iptables)
     _rules6=$(get_rule_count ip6tables)
     _lc=$(get_list_count "$MODDIR/.list_count" "$LISTS/list-general.txt")
-    _ic=$(get_list_count "$MODDIR/.ipset_count" "$LISTS/ipset-all.txt")
     _prof_name=$(get_active_profile)
     _prof_label=$(get_profile_label "$_prof_name")
 
-    printf '{"version":"%s","active":%s,"pid":"%s","pid_count":%s,"rules_v4":%s,"rules_v6":%s,"domain_count":%s,"ipset_count":%s,"profile":"%s","profile_label":"%s"}\n' \
-        "$(json_escape "$_ver")" "$_active" "$(json_escape "$_pid")" "$_pid_count" "$_rules" "$_rules6" "$_lc" "$_ic" "$(json_escape "$_prof_name")" "$(json_escape "$_prof_label")"
+    printf '{"version":"%s","active":%s,"pid":"%s","pid_count":%s,"rules_v4":%s,"rules_v6":%s,"domain_count":%s,"profile":"%s","profile_label":"%s"}\n' \
+        "$(json_escape "$_ver")" "$_active" "$(json_escape "$_pid")" "$_pid_count" "$_rules" "$_rules6" "$_lc" "$(json_escape "$_prof_name")" "$(json_escape "$_prof_label")"
 }
 
 get_rule_count() {
@@ -259,10 +249,6 @@ update_list_file() {
     return 1
 }
 
-update_ipset_file() {
-    download_to_tmp "$DEFAULT_IPSET_SOURCE" "$LISTS/ipset-all.txt" "ipset-all.txt"
-}
-
 restart_if_running() {
     if is_running; then
         echo "[*] Restarting nfqws to apply changes..."
@@ -277,7 +263,7 @@ run_diagnose() {
     echo "nzapret diagnostics"
     echo "--------------------"
 
-    for _cmd in iptables ip6tables pgrep tail curl; do
+    for _cmd in iptables ip6tables pgrep tail curl ip; do
         if command -v "$_cmd" >/dev/null 2>&1; then
             echo "[OK] command available: $_cmd"
         else
@@ -285,17 +271,16 @@ run_diagnose() {
         fi
     done
 
+    _active_profile=$(get_active_profile)
+    _active_profile_config=$(get_profile_config_file "$_active_profile")
+
     for _file in \
         "$BIN" \
+        "$_active_profile_config" \
         "$LISTS/list-general.txt" \
         "$LISTS/list-google.txt" \
-        "$LISTS/list-exclude.txt" \
-        "$LISTS/ipset-all.txt" \
-        "$LISTS/ipset-exclude.txt" \
         "$PAYLOADS/quic_initial_www_google_com.bin" \
-        "$PAYLOADS/tls_clienthello_www_google_com.bin" \
-        "$PAYLOADS/tls_clienthello_max_ru.bin" \
-        "$PAYLOADS/stun.bin"; do
+        "$PAYLOADS/tls_clienthello_www_google_com.bin"; do
         if [ -f "$_file" ]; then
             echo "[OK] file present: $_file"
         else
@@ -326,35 +311,155 @@ run_diagnose() {
     done
 
     if command -v ip >/dev/null 2>&1; then
-        if ip route 2>/dev/null | grep -q '^default '; then
-            echo "[OK] IPv4 default route present"
+        if ip route get 1.1.1.1 >/dev/null 2>&1; then
+            echo "[OK] IPv4 route lookup works"
         else
-            echo "[!!] IPv4 default route missing"
+            echo "[!!] IPv4 route lookup failed"
         fi
 
-        if ip -6 route 2>/dev/null | grep -q '^default '; then
-            echo "[OK] IPv6 default route present"
+        if ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 '; then
+            if ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1; then
+                echo "[OK] IPv6 route lookup works"
+            else
+                echo "[!!] IPv6 route lookup failed"
+            fi
         else
-            echo "[!!] IPv6 default route missing"
+            echo "[OK] IPv6 not configured on active network"
         fi
     fi
 
     print_profile_status
+}
 
-    echo ""
-    echo "Last 20 log lines:"
-    if [ -f "$LOGFILE" ]; then
-        tail -n 20 "$LOGFILE"
+run_diagnose_json() {
+    _checks=""
+    _ok=0
+    _fail=0
+    _sep=""
+
+    for _cmd in iptables ip6tables pgrep tail curl ip; do
+        if command -v "$_cmd" >/dev/null 2>&1; then
+            _checks="${_checks}${_sep}{\"name\":\"$(json_escape "$_cmd")\",\"status\":\"ok\",\"detail\":\"command available\"}"
+            _ok=$((_ok + 1))
+        else
+            _checks="${_checks}${_sep}{\"name\":\"$(json_escape "$_cmd")\",\"status\":\"fail\",\"detail\":\"command missing\"}"
+            _fail=$((_fail + 1))
+        fi
+        _sep=","
+    done
+
+    _active_profile=$(get_active_profile)
+    _active_profile_config=$(get_profile_config_file "$_active_profile")
+
+    for _file in \
+        "$BIN" \
+        "$_active_profile_config" \
+        "$LISTS/list-general.txt" \
+        "$LISTS/list-google.txt" \
+        "$PAYLOADS/quic_initial_www_google_com.bin" \
+        "$PAYLOADS/tls_clienthello_www_google_com.bin"; do
+        _fname=$(basename "$_file")
+        if [ -f "$_file" ]; then
+            _checks="${_checks}${_sep}{\"name\":\"$(json_escape "$_fname")\",\"status\":\"ok\",\"detail\":\"file present\"}"
+            _ok=$((_ok + 1))
+        else
+            _checks="${_checks}${_sep}{\"name\":\"$(json_escape "$_fname")\",\"status\":\"fail\",\"detail\":\"file missing\"}"
+            _fail=$((_fail + 1))
+        fi
+        _sep=","
+    done
+
+    _pid=$(get_first_pid)
+    if [ -n "$_pid" ]; then
+        _checks="${_checks}${_sep}{\"name\":\"nfqws process\",\"status\":\"ok\",\"detail\":\"running (pid: $_pid)\"}"
+        _ok=$((_ok + 1))
     else
-        echo "Log file not found."
+        _checks="${_checks}${_sep}{\"name\":\"nfqws process\",\"status\":\"fail\",\"detail\":\"not running\"}"
+        _fail=$((_fail + 1))
     fi
+    _sep=","
+
+    for _ct in OUTPUT FORWARD; do
+        if iptables -t mangle -C "$_ct" -j "$CHAIN" >/dev/null 2>&1; then
+            _checks="${_checks}${_sep}{\"name\":\"iptables $_ct\",\"status\":\"ok\",\"detail\":\"jump present\"}"
+            _ok=$((_ok + 1))
+        else
+            _checks="${_checks}${_sep}{\"name\":\"iptables $_ct\",\"status\":\"fail\",\"detail\":\"jump missing\"}"
+            _fail=$((_fail + 1))
+        fi
+        if ip6tables -t mangle -C "$_ct" -j "$CHAIN" >/dev/null 2>&1; then
+            _checks="${_checks}${_sep}{\"name\":\"ip6tables $_ct\",\"status\":\"ok\",\"detail\":\"jump present\"}"
+            _ok=$((_ok + 1))
+        else
+            _checks="${_checks}${_sep}{\"name\":\"ip6tables $_ct\",\"status\":\"fail\",\"detail\":\"jump missing\"}"
+            _fail=$((_fail + 1))
+        fi
+    done
+
+    if command -v ip >/dev/null 2>&1; then
+        if ip route get 1.1.1.1 >/dev/null 2>&1; then
+            _checks="${_checks}${_sep}{\"name\":\"IPv4 routing\",\"status\":\"ok\",\"detail\":\"route lookup works\"}"
+            _ok=$((_ok + 1))
+        else
+            _checks="${_checks}${_sep}{\"name\":\"IPv4 routing\",\"status\":\"fail\",\"detail\":\"route lookup failed\"}"
+            _fail=$((_fail + 1))
+        fi
+        if ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 '; then
+            if ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1; then
+                _checks="${_checks}${_sep}{\"name\":\"IPv6 routing\",\"status\":\"ok\",\"detail\":\"route lookup works\"}"
+                _ok=$((_ok + 1))
+            else
+                _checks="${_checks}${_sep}{\"name\":\"IPv6 routing\",\"status\":\"fail\",\"detail\":\"route lookup failed\"}"
+                _fail=$((_fail + 1))
+            fi
+        else
+            _checks="${_checks}${_sep}{\"name\":\"IPv6 routing\",\"status\":\"ok\",\"detail\":\"not configured\"}"
+            _ok=$((_ok + 1))
+        fi
+    fi
+
+    _total=$((_ok + _fail))
+    printf '{"checks":[%s],"summary":{"ok":%d,"fail":%d,"total":%d}}\n' \
+        "$_checks" "$_ok" "$_fail" "$_total"
+}
+
+print_events_text() {
+    _tail="${1:-30}"
+    if [ -f "$EVENTLOG" ]; then
+        tail -n "$_tail" "$EVENTLOG"
+    else
+        echo "No events recorded yet."
+    fi
+}
+
+print_events_json() {
+    _tail="${1:-30}"
+    [ -f "$EVENTLOG" ] || { echo '[]'; return; }
+    tail -n "$_tail" "$EVENTLOG" 2>/dev/null | {
+        printf '['
+        _sep=""
+        _found=0
+        while read -r _date _clock _type _msg || [ -n "$_date$_clock$_type$_msg" ]; do
+            [ -n "$_date$_clock$_type" ] || continue
+            printf '%s{"time":"%s %s","type":"%s","message":"%s"}' \
+                "$_sep" \
+                "$_date" \
+                "$_clock" \
+                "$_type" \
+                "$(json_escape "$_msg")"
+            _sep=","
+            _found=1
+        done
+        [ "$_found" = "1" ] || printf ''
+        printf ']\n'
+    }
 }
 
 # Entry point
 ensure_utils_dir
 
 [ $# -eq 0 ] && {
-    set -- status
+    set -- help
 }
 
 case "$1" in
@@ -401,33 +506,20 @@ case "$1" in
     "update")
         require_cmd curl
         case "$2" in
-            ""|"all")
-                _updated=0
+            ""|"all"|"list")
                 echo "[*] Updating list-general.txt..."
-                update_list_file && _updated=1
-                echo "[*] Updating ipset-all.txt..."
-                update_ipset_file && _updated=1
-                refresh_counts
-                [ "$_updated" = "1" ] || {
-                    echo "[-] No files were updated."
+                if update_list_file; then
+                    _new_count=$(wc -l < "$LISTS/list-general.txt" 2>/dev/null || echo "?")
+                    log_event UPDATE "list-general.txt updated ($_new_count domains)"
+                    refresh_counts
+                    restart_if_running
+                else
+                    log_event ERROR "list-general.txt update failed"
                     exit 1
-                }
-                restart_if_running
-                ;;
-            "list")
-                echo "[*] Updating list-general.txt..."
-                update_list_file || exit 1
-                refresh_counts
-                restart_if_running
-                ;;
-            "ipset")
-                echo "[*] Updating ipset-all.txt..."
-                update_ipset_file || exit 1
-                refresh_counts
-                restart_if_running
+                fi
                 ;;
             *)
-                echo "Usage: nzapret update [list|ipset|all]"
+                echo "Usage: nzapret update [list]"
                 exit 1
                 ;;
         esac
@@ -465,26 +557,6 @@ case "$1" in
         fi
         ;;
 
-    "check-updates")
-        require_cmd curl
-        echo "[*] Checking for updates..."
-        _remote_raw=$(curl -s -f -L "$VERSION_URL" 2>/dev/null)
-        if [ -z "$_remote_raw" ]; then
-            echo "[-] Failed to check (no internet or server unavailable)"
-            exit 1
-        fi
-        _local_ver=$(normalize_version "$(get_version)")
-        _remote_ver=$(normalize_version "$_remote_raw")
-        echo "Installed: v$_local_ver"
-        echo "Latest:    v$_remote_ver"
-        if [ "$_local_ver" = "$_remote_ver" ]; then
-            echo "[+] You are up to date"
-        else
-            echo "[!] New version available: v$_remote_ver"
-            echo "    Download: $RELEASES_URL"
-        fi
-        ;;
-
     "profile")
         case "$2" in
             ""|"status")
@@ -499,6 +571,7 @@ case "$1" in
                     exit 1
                 }
                 set_active_profile "$3"
+                log_event PROFILE "changed to $3 ($(get_profile_label "$3"))"
                 echo "[+] Active profile set to: $3"
                 echo "[*] Restart nzapret to apply changes"
                 ;;
@@ -510,7 +583,35 @@ case "$1" in
         ;;
 
     "diagnose")
-        run_diagnose
+        case "$2" in
+            "--json") run_diagnose_json ;;
+            *)        run_diagnose ;;
+        esac
+        ;;
+
+    "events")
+        _evt_tail=30
+        _evt_json=0
+        _evt_clear=0
+        shift
+        for _arg in "$@"; do
+            case "$_arg" in
+                "clear"|"--clear") _evt_clear=1 ;;
+                --json) _evt_json=1 ;;
+                --tail=*) _evt_tail="${_arg#--tail=}" ;;
+            esac
+        done
+        if [ "$_evt_clear" = "1" ]; then
+            : > "$EVENTLOG" || {
+                echo "[-] Failed to clear event log."
+                exit 1
+            }
+            echo "[+] Event log cleared."
+        elif [ "$_evt_json" = "1" ]; then
+            print_events_json "$_evt_tail"
+        else
+            print_events_text "$_evt_tail"
+        fi
         ;;
 
     "help"|"--help"|"-h"|*)
@@ -521,13 +622,16 @@ case "$1" in
         echo "  start                       - start traffic interception"
         echo "  stop                        - stop interception and clear rules"
         echo "  restart                     - restart nfqws and iptables rules"
-        echo "  update [list|ipset|all]     - update routing lists"
+        echo "  update [list]               - update routing hostlist"
         echo "  status                      - show nfqws, iptables and list info"
         echo "  status --json               - machine-readable status for WebUI"
-        echo "  log                         - show nfqws process details"
-        echo "  check-updates               - check for new module version"
+        echo "  log                         - show nfqws runtime log"
+        echo "  events                      - show event history"
+        echo "  events clear                - clear the whole event log file"
+        echo "  events --json [--tail=N]    - event history as JSON"
         echo "  profile <subcommand>        - show, list or switch nfqws profiles"
         echo "  diagnose                    - run Android-side diagnostics"
+        echo "  diagnose --json             - diagnostics as JSON for WebUI"
         echo "  help                        - show this help message"
         echo ""
         echo "Profile commands: status, list, set <name>"

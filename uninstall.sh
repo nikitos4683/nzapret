@@ -8,6 +8,7 @@ IPT="iptables -w"
 IP6T="ip6tables -w"
 CHAIN="nzapret_out"
 LOGFILE="$MODDIR/nzapret.log"
+EVENTLOG="$MODDIR/nzapret-events.log"
 
 log() {
     echo "[nzapret] $*" >> "$LOGFILE"
@@ -51,3 +52,6 @@ require_cmd ip6tables
 # Iptables cleanup
 cleanup_tables
 log "service uninstalled"
+# Write stop event to event log.
+_ts=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "----")
+printf '%s %-8s %s\n' "$_ts" "STOP" "service stopped" >> "$EVENTLOG"

@@ -30,117 +30,145 @@
             </div>
         </div>
 
-        <div class="card status-card inactive" id="statusCard">
-            <div class="status-header">
-                <div class="status-indicator">
-                    <div class="status-dot off" id="statusDot"></div>
-                    <span class="status-label off" id="statusLabel">CHECKING...</span>
-                </div>
-                <div class="status-badge" id="pidBadge">PID --</div>
-            </div>
-            <div class="status-grid">
-                <div class="status-item" style="grid-column: 1 / -1;">
-                    <span class="status-item-label">Routing Profile</span>
-                    <span class="status-item-value" id="profileName">--</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-item-label">Domains</span>
-                    <span class="status-item-value" id="domainCount">0</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-item-label">IP Ranges</span>
-                    <span class="status-item-value" id="ipsetCount">0</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-item-label">IPv4 Rules</span>
-                    <span class="status-item-value" id="rulesV4">0</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-item-label">IPv6 Rules</span>
-                    <span class="status-item-value" id="rulesV6">0</span>
-                </div>
-            </div>
+        <div class="page-nav" role="tablist" aria-label="Sections">
+            <button class="page-tab active" id="btnPageRuntime" onclick="setPage('runtime')">Runtime</button>
+            <button class="page-tab" id="btnPageTools" onclick="setPage('tools')">Tools</button>
+            <button class="page-tab" id="btnPageLogs" onclick="setPage('logs')">Logs</button>
         </div>
 
-        <div class="section-title">Runtime</div>
-        <div class="actions action-grid-main">
-            <button class="action-btn" id="btnStart" onclick="doAction('start')">
-                <div class="action-icon start">
-                    <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        <div class="page active" id="pageRuntime">
+            <div class="card status-card inactive" id="statusCard">
+                <div class="status-header">
+                    <div class="status-indicator">
+                        <div class="status-dot off" id="statusDot"></div>
+                        <span class="status-label off" id="statusLabel">CHECKING...</span>
+                    </div>
+                    <div class="status-badge" id="pidBadge">PID --</div>
                 </div>
-                <span>Start</span>
-            </button>
-            <button class="action-btn" id="btnStop" onclick="doAction('stop')">
-                <div class="action-icon stop">
-                    <svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
-                </div>
-                <span>Stop</span>
-            </button>
-            <button class="action-btn" id="btnRestart" onclick="doAction('restart')">
-                <div class="action-icon restart">
-                    <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
-                </div>
-                <span>Restart</span>
-            </button>
-            <button class="action-btn" id="btnUpdate" onclick="doAction('update all')">
-                <div class="action-icon update">
-                    <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-                </div>
-                <span>Update All</span>
-            </button>
-        </div>
-
-        <div class="card utility-card">
-            <div class="panel-head">
-                <div>
-                    <div class="panel-title">Maintenance</div>
-                    <div class="panel-subtitle">Manual updates and diagnostics</div>
-                </div>
-            </div>
-            <div class="mini-actions">
-                <button class="mini-btn" onclick="doAction('update list')">Update List</button>
-                <button class="mini-btn" onclick="doAction('update ipset')">Update IPSet</button>
-                <button class="mini-btn" onclick="runInfoCommand('check-updates', 'Checking for updates...')">Check Updates</button>
-                <button class="mini-btn" onclick="runInfoCommand('diagnose', 'Running diagnostics...')">Diagnose</button>
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="panel-head">
-                <div>
-                    <div class="panel-title">Routing Profile</div>
-                    <div class="panel-subtitle">Choose the active bypass strategy</div>
-                </div>
-            </div>
-
-            <div class="control-block">
-                <div class="control-row">
-                    <div>
-                        <div class="control-title">Routing Profile</div>
-                        <div class="control-note">Active bypass strategy (requires restart)</div>
+                <div class="status-grid">
+                    <div class="status-item" style="grid-column: 1 / -1;">
+                        <span class="status-item-label">Routing Profile</span>
+                        <span class="status-item-value" id="profileName">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-item-label">Domains</span>
+                        <span class="status-item-value" id="domainCount">0</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-item-label">IPv4 Rules</span>
+                        <span class="status-item-value" id="rulesV4">0</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-item-label">IPv6 Rules</span>
+                        <span class="status-item-value" id="rulesV6">0</span>
                     </div>
                 </div>
+            </div>
+
+            <div class="actions action-grid-main">
+                <button class="action-btn" id="btnStart" onclick="doAction('start')">
+                    <div class="action-icon start">
+                        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    </div>
+                    <span>Start</span>
+                </button>
+                <button class="action-btn" id="btnStop" onclick="doAction('stop')">
+                    <div class="action-icon stop">
+                        <svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+                    </div>
+                    <span>Stop</span>
+                </button>
+                <button class="action-btn" id="btnRestart" onclick="doAction('restart')">
+                    <div class="action-icon restart">
+                        <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                    </div>
+                    <span>Restart</span>
+                </button>
+                <button class="action-btn" id="btnUpdate" onclick="doAction('update')">
+                    <div class="action-icon update">
+                        <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                    </div>
+                    <span>Update List</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="page" id="pageTools">
+            <div class="card">
+                <div class="panel-head">
+                    <div>
+                        <div class="panel-title">Routing Profile</div>
+                        <div class="panel-subtitle">Choose the active bypass strategy. Changes apply after restart.</div>
+                    </div>
+                </div>
+
                 <div class="profile-slider-container">
                     <div class="profile-slider" id="profileSlider">
-                        <div class="glider" id="profileGlider" style="display: none;"></div>
                         <!-- Items injected by JS -->
                     </div>
                 </div>
             </div>
-        </div>
 
-        <div class="card output-card">
-            <div class="panel-head">
-                <div>
-                    <div class="panel-title">Activity Log</div>
-                    <div class="panel-subtitle" id="activityMeta">Manual command output and nfqws log in one view</div>
+            <div class="card" id="diagCard">
+                <div class="panel-head">
+                    <div>
+                        <div class="panel-title">Diagnostics</div>
+                        <div class="panel-subtitle">Inspect current runtime state</div>
+                    </div>
+                    <button class="diag-run-btn" id="btnDiagnose" onclick="runDiagnose()">
+                        <span class="diag-run-btn-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24"><path d="M12 3.25c.45 0 .86.24 1.07.63l8.27 15.2c.2.37.2.83-.02 1.19-.21.36-.6.58-1.02.58H3.7c-.42 0-.81-.22-1.02-.58-.22-.36-.22-.82-.02-1.19l8.27-15.2c.21-.39.62-.63 1.07-.63zm0 5.25a1.03 1.03 0 00-1.03 1.03v4.62a1.03 1.03 0 102.06 0V9.53A1.03 1.03 0 0012 8.5zm0 9.06a1.16 1.16 0 100-2.32 1.16 1.16 0 000 2.32z"/></svg>
+                        </span>
+                        <span class="diag-run-btn-label">Run Diagnose</span>
+                    </button>
                 </div>
-                <div class="panel-actions">
-                    <button class="icon-btn" id="btnLiveLog" onclick="toggleLiveLog()">Live Log</button>
-                    <button class="icon-btn" onclick="clearOutput()">Clear</button>
+
+                <div class="diag-results" id="diagResults" hidden>
+                    <div class="diag-summary" id="diagSummary"></div>
+                    <div class="diag-checklist-shell" id="diagChecklistShell" hidden>
+                        <div class="diag-checklist" id="diagChecklist"></div>
+                    </div>
                 </div>
             </div>
-            <pre class="output-text" id="activityText">No output yet.</pre>
+        </div>
+
+        <div class="page" id="pageLogs">
+            <div class="card">
+                <div class="panel-head">
+                    <div>
+                        <div class="panel-title">Logs</div>
+                        <div class="panel-subtitle" id="logMeta">nfqws stdout / stderr</div>
+                    </div>
+                    <div class="log-tabs">
+                        <div class="log-tab-group">
+                            <button class="log-tab-btn active" id="btnRuntimeTab" onclick="setLogView('runtime')">nfqws Log</button>
+                            <button class="log-tab-btn" id="btnEventsTab" onclick="setLogView('events')">Events</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="log-panels">
+                    <pre class="log-pane active" id="runtimeLogPane">Loading runtime log...</pre>
+                    <div class="events-pane" id="eventsPane">
+                        <div class="events-empty">No events recorded yet.</div>
+                    </div>
+                </div>
+
+                <div class="log-status-bar" id="logStatusBar">
+                    <div class="log-live-dot" id="logLiveDot" style="display:none;"></div>
+                    <span class="log-live-label" id="logLiveLabel" style="display:none;">LIVE</span>
+                    <div class="log-status-sep" id="logLiveSep" style="display:none;"></div>
+                    <span id="logLineCount">--</span>
+                    <button class="event-clear-btn" id="btnClearEvents" onclick="clearEventsLog()" hidden>
+                        <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                        Clear Events
+                    </button>
+                    <button class="log-jump-btn" id="logJumpBtn" onclick="jumpToBottom()">
+                        <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>
+                        End
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -153,25 +181,32 @@
         const CLI = `sh ${MODDIR}/system/bin/nzapret`;
         const STATUS_POLL_MS = 5000;
         const LOG_POLL_MS = 3000;
+        const EVENTS_POLL_MS = 5000;
 
         let isLoading = false;
         let statusInterval = null;
         let logInterval = null;
+        let eventsInterval = null;
         let hasShownStatusError = false;
         let statusRequestInFlight = false;
         let logRequestInFlight = false;
-        let liveLogEnabled = false;
-        let manualOutputTitle = '';
-        let manualOutputText = '';
-        let liveLogText = '';
+        let eventsRequestInFlight = false;
+        let runtimeLogText = '';
+        let eventsData = [];
+        let lastEventsPayload = '';
+        let activePage = 'runtime';
+        let activeLogView = 'runtime';
         let currentStatus = null;
         let profilesLoaded = false;
+        let userScrolledUp = false;
+        let diagnosticsData = null;
+        let diagnosticsExpanded = false;
 
         function shellQuote(value) {
-            return "'" + String(value).replace(/'/g, "'\\''") + "'";
+            return "'" + String(value).replace(/'/g, "'\\''" ) + "'";
         }
 
-        function setUiLocked(locked, message = 'Applying changes...') {
+        function setUiLocked(locked, message =     'Applying changes...') {
             const overlay = document.getElementById('uiLock');
             const text = document.getElementById('uiLockText');
             text.textContent = message;
@@ -196,50 +231,371 @@
             return parseInt(n || 0, 10).toLocaleString('en-US');
         }
 
-        function buildActivitySections() {
-            const sections = [];
-
-            if (manualOutputText) {
-                sections.push(`${manualOutputTitle || 'Command Output'}\n${manualOutputText}`);
-            }
-
-            if (liveLogText) {
-                sections.push(`nfqws log\n${liveLogText}`);
-            }
-
-            return sections;
+        function updatePageButtons() {
+            document.getElementById('btnPageRuntime').classList.toggle('active', activePage === 'runtime');
+            document.getElementById('btnPageTools').classList.toggle('active', activePage === 'tools');
+            document.getElementById('btnPageLogs').classList.toggle('active', activePage === 'logs');
         }
 
-        function updateActivityMeta() {
-            const parts = [];
+        function renderPages() {
+            document.getElementById('pageRuntime').classList.toggle('active', activePage === 'runtime');
+            document.getElementById('pageTools').classList.toggle('active', activePage === 'tools');
+            document.getElementById('pageLogs').classList.toggle('active', activePage === 'logs');
+            updatePageButtons();
+            updateLogPanelHeight();
+            syncLogPolling();
+        }
 
-            if (manualOutputTitle) {
-                parts.push(manualOutputTitle);
+        async function setPage(page) {
+            activePage = page;
+            renderPages();
+
+            if (activePage === 'logs') {
+                if (activeLogView === 'runtime') {
+                    if (!runtimeLogText) {
+                        runtimeLogText = 'Loading runtime log...';
+                        renderRuntimeLog(true);
+                    }
+                    await refreshLog();
+                } else {
+                    await refreshEvents();
+                }
+            }
+        }
+
+        // --- Tab control ---
+        function updateTabButtons() {
+            document.getElementById('btnEventsTab').classList.toggle('active', activeLogView === 'events');
+            document.getElementById('btnRuntimeTab').classList.toggle('active', activeLogView === 'runtime');
+        }
+
+        function updateLogMeta() {
+            const meta = document.getElementById('logMeta');
+            if (activeLogView === 'events') {
+                const count = eventsData.length;
+                meta.textContent = count ? `${count} event${count === 1 ? '' : 's'}` : 'Event history';
+            } else {
+                meta.textContent = 'nfqws stdout / stderr';
+            }
+        }
+
+        function updateStatusBar() {
+            const isLive = activeLogView === 'runtime' && logInterval !== null;
+            const clearButton = document.getElementById('btnClearEvents');
+            const jumpButton = document.getElementById('logJumpBtn');
+            document.getElementById('logLiveDot').style.display = isLive ? '' : 'none';
+            document.getElementById('logLiveLabel').style.display = isLive ? '' : 'none';
+            document.getElementById('logLiveSep').style.display = isLive ? '' : 'none';
+
+            if (activeLogView === 'runtime') {
+                const lines = runtimeLogText ? runtimeLogText.split('\n').length : 0;
+                document.getElementById('logLineCount').textContent = `${lines} lines`;
+                clearButton.hidden = true;
+                jumpButton.classList.toggle('visible', userScrolledUp);
+            } else {
+                document.getElementById('logLineCount').textContent = `${eventsData.length} entries`;
+                clearButton.hidden = false;
+                jumpButton.classList.remove('visible');
+            }
+        }
+
+        // --- Events tab ---
+        function renderEventsPane() {
+            const pane = document.getElementById('eventsPane');
+            if (!eventsData.length) {
+                pane.innerHTML = '<div class="events-empty">No events recorded yet.</div>';
+                return;
             }
 
-            if (liveLogEnabled) {
-                parts.push('Live tail enabled');
-            } else if (liveLogText) {
-                parts.push('Live tail snapshot');
+            const html = eventsData.map(evt => {
+                const typeLower = (evt.type || '').toLowerCase();
+                return `<div class="event-item">
+                    <div class="event-dot ${typeLower}"></div>
+                    <div class="event-body">
+                        <div class="event-head">
+                            <span class="event-type">${esc(evt.type)}</span>
+                            <span class="event-time">${esc(evt.time ? evt.time.substring(11) : '')}</span>
+                        </div>
+                        <div class="event-msg">${esc(evt.message)}</div>
+                    </div>
+                </div>`;
+            }).join('');
+            pane.innerHTML = html;
+
+            // Auto-scroll to bottom
+            if (!userScrolledUp) {
+                pane.scrollTop = pane.scrollHeight;
+            }
+        }
+
+        function esc(str) {
+            return String(str || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function getDiagnoseButtonMarkup(label) {
+            return `
+                <span class="diag-run-btn-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M12 3.25c.45 0 .86.24 1.07.63l8.27 15.2c.2.37.2.83-.02 1.19-.21.36-.6.58-1.02.58H3.7c-.42 0-.81-.22-1.02-.58-.22-.36-.22-.82-.02-1.19l8.27-15.2c.21-.39.62-.63 1.07-.63zm0 5.25a1.03 1.03 0 00-1.03 1.03v4.62a1.03 1.03 0 102.06 0V9.53A1.03 1.03 0 0012 8.5zm0 9.06a1.16 1.16 0 100-2.32 1.16 1.16 0 000 2.32z"/></svg>
+                </span>
+                <span class="diag-run-btn-label">${esc(label)}</span>
+            `;
+        }
+
+        function setDiagnoseButtonState(button, label, loading = false) {
+            if (!button) return;
+            button.classList.toggle('loading', loading);
+            button.innerHTML = getDiagnoseButtonMarkup(label);
+        }
+
+        function clearDiagnostics() {
+            diagnosticsData = null;
+            diagnosticsExpanded = false;
+            renderDiagnosticsPanel();
+        }
+
+        function toggleDiagnosticsDetails() {
+            if (!diagnosticsData) return;
+            diagnosticsExpanded = !diagnosticsExpanded;
+            renderDiagnosticsPanel();
+        }
+
+        function renderDiagnosticsPanel() {
+            const results = document.getElementById('diagResults');
+            const checklistShell = document.getElementById('diagChecklistShell');
+            const checklist = document.getElementById('diagChecklist');
+            const summary = document.getElementById('diagSummary');
+
+            if (!diagnosticsData) {
+                results.hidden = true;
+                checklistShell.hidden = true;
+                checklist.innerHTML = '';
+                summary.innerHTML = '';
+                return;
             }
 
-            document.getElementById('activityMeta').textContent = parts.join(' • ') || 'Manual command output and nfqws log in one view';
+            const s = diagnosticsData.summary || { ok: 0, fail: 0, total: 0 };
+            const checks = diagnosticsData.checks || [];
+            const toggleLabel = diagnosticsExpanded
+                ? 'Hide Details'
+                : `Show Details (${checks.length})`;
+
+            summary.innerHTML = `
+                <div class="diag-summary-main">
+                    <span class="diag-summary-text">
+                        <span class="pass-count">${s.ok} passed</span> · <span class="fail-count">${s.fail} failed</span> / ${s.total}
+                    </span>
+                    <span class="diag-summary-note">${diagnosticsExpanded ? 'Detailed checklist expanded' : 'Detailed checklist hidden'}</span>
+                </div>
+                <div class="diag-summary-actions">
+                    <button class="diag-inline-btn" onclick="toggleDiagnosticsDetails()">${esc(toggleLabel)}</button>
+                    <button class="diag-inline-btn" onclick="clearDiagnostics()">Clear</button>
+                </div>
+            `;
+
+            if (diagnosticsExpanded) {
+                checklist.innerHTML = checks.map(c => `
+                    <div class="diag-item">
+                        <div class="diag-icon ${c.status}">${c.status === 'ok' ? '✓' : '✗'}</div>
+                        <span class="diag-name">${esc(c.name)}</span>
+                        <span class="diag-detail">${esc(c.detail)}</span>
+                    </div>
+                `).join('');
+                checklistShell.hidden = false;
+            } else {
+                checklist.innerHTML = '';
+                checklistShell.hidden = true;
+            }
+
+            results.hidden = false;
         }
 
-        function renderActivity() {
-            const sections = buildActivitySections();
-            document.getElementById('activityText').textContent = sections.length
-                ? sections.join('\n\n────────────────────────────────────────\n\n')
-                : 'No output yet.';
-            updateActivityMeta();
+        async function refreshEvents() {
+            if (eventsRequestInFlight) return;
+            eventsRequestInFlight = true;
+            try {
+                const res = await exec(`${CLI} events --json --tail=50`);
+                const raw = (res.stdout || '').trim();
+                const arrMatch = raw.match(/\[[\s\S]*\]/);
+                if (arrMatch) {
+                    const payload = arrMatch[0];
+                    if (payload === lastEventsPayload) {
+                        return;
+                    }
+                    eventsData = JSON.parse(payload);
+                    lastEventsPayload = payload;
+                    if (activeLogView === 'events') {
+                        renderEventsPane();
+                        updateLogMeta();
+                        updateStatusBar();
+                    }
+                }
+            } catch (e) {
+                console.error('Events refresh error:', e);
+            } finally {
+                eventsRequestInFlight = false;
+            }
         }
 
-        function setManualOutput(title, text) {
-            manualOutputTitle = title;
-            manualOutputText = text || '(no output)';
-            renderActivity();
+        // --- Runtime log tab ---
+        function renderRuntimeLog(forceBottom = false) {
+            const pane = document.getElementById('runtimeLogPane');
+            const isNearBottom = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 40;
+
+            pane.textContent = runtimeLogText || 'Runtime log is empty.';
+
+            if (forceBottom || isNearBottom) {
+                pane.scrollTop = pane.scrollHeight;
+                userScrolledUp = false;
+            }
         }
 
+        async function refreshLog() {
+            if (logRequestInFlight) return;
+            if (activeLogView !== 'runtime') return;
+
+            logRequestInFlight = true;
+            try {
+                const res = await exec(`tail -n 80 ${MODDIR}/nzapret.log 2>/dev/null || echo "No active log"`);
+                runtimeLogText = (res.stdout || 'No output').trim() || 'No output';
+                renderRuntimeLog();
+                updateStatusBar();
+            } finally {
+                logRequestInFlight = false;
+            }
+        }
+
+        // --- Scroll tracking for jump-to-bottom ---
+        function setupScrollTracking() {
+            const runtimePane = document.getElementById('runtimeLogPane');
+            const eventsPane = document.getElementById('eventsPane');
+
+            function onScroll(pane) {
+                const nearBottom = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 40;
+                userScrolledUp = !nearBottom;
+                document.getElementById('logJumpBtn').classList.toggle('visible', activeLogView === 'runtime' && userScrolledUp);
+            }
+
+            runtimePane.addEventListener('scroll', () => onScroll(runtimePane));
+            eventsPane.addEventListener('scroll', () => onScroll(eventsPane));
+        }
+
+        function jumpToBottom() {
+            const activePane = activeLogView === 'events'
+                ? document.getElementById('eventsPane')
+                : document.getElementById('runtimeLogPane');
+            activePane.scrollTop = activePane.scrollHeight;
+            userScrolledUp = false;
+            document.getElementById('logJumpBtn').classList.remove('visible');
+        }
+
+        // --- Log view switching ---
+        function renderLogView() {
+            const eventsPane = document.getElementById('eventsPane');
+            const runtimePane = document.getElementById('runtimeLogPane');
+
+            eventsPane.classList.toggle('active', activeLogView === 'events');
+            runtimePane.classList.toggle('active', activeLogView === 'runtime');
+            updateTabButtons();
+            updateLogMeta();
+            updateStatusBar();
+            updateLogPanelHeight();
+            userScrolledUp = false;
+            document.getElementById('logJumpBtn').classList.remove('visible');
+        }
+
+        function updateLogPanelHeight() {
+            const panels = document.querySelector('#pageLogs .log-panels');
+            const statusBar = document.getElementById('logStatusBar');
+            const card = document.querySelector('#pageLogs .card');
+            if (!panels || !statusBar || !card) return;
+
+            if (activePage !== 'logs') {
+                panels.style.removeProperty('height');
+                return;
+            }
+
+            const viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+            const bodyStyles = getComputedStyle(document.body);
+            const cardStyles = getComputedStyle(card);
+            const panelsTop = panels.getBoundingClientRect().top;
+            const safeBottom = viewportHeight - (parseFloat(bodyStyles.paddingBottom) || 0);
+            const cardBottomExtra = (parseFloat(cardStyles.paddingBottom) || 0) + (parseFloat(cardStyles.marginBottom) || 0);
+            const available = Math.floor(safeBottom - panelsTop - statusBar.offsetHeight - cardBottomExtra - 4);
+            panels.style.height = `${Math.max(240, available)}px`;
+        }
+
+        function syncLogPolling() {
+            if (activePage === 'logs' && activeLogView === 'runtime' && !document.hidden) {
+                startLogPolling();
+            } else {
+                stopLogPolling();
+            }
+
+            if (activePage === 'logs' && activeLogView === 'events' && !document.hidden) {
+                startEventsPolling();
+            } else {
+                stopEventsPolling();
+            }
+        }
+
+        async function setLogView(view) {
+            activeLogView = view;
+            renderLogView();
+            syncLogPolling();
+
+            if (view === 'runtime') {
+                if (!runtimeLogText) {
+                    runtimeLogText = 'Loading runtime log...';
+                    renderRuntimeLog(true);
+                }
+                await refreshLog();
+            } else {
+                await refreshEvents();
+            }
+        }
+
+        // --- Diagnostics (inline checklist) ---
+        async function runDiagnose() {
+            const btn = document.getElementById('btnDiagnose');
+            if (btn.classList.contains('loading')) return;
+            setDiagnoseButtonState(btn, 'Running Diagnose...', true);
+
+            try {
+                setUiLocked(true, 'Running diagnostics...');
+                await waitForPaint();
+
+                const res = await exec(`${CLI} diagnose --json`);
+                const raw = (res.stdout || '').trim();
+                const jsonMatch = raw.match(/\{[\s\S]*\}/);
+
+                if (!jsonMatch) {
+                    showToast('Diagnostics failed');
+                    return;
+                }
+
+                const data = JSON.parse(jsonMatch[0]);
+                renderDiagnostics(data);
+                showToast('Diagnostics completed');
+            } catch (error) {
+                showToast(`Diagnostics error: ${error.message}`);
+            } finally {
+                setDiagnoseButtonState(btn, 'Run Diagnose');
+                setUiLocked(false);
+            }
+        }
+
+        function renderDiagnostics(data) {
+            diagnosticsData = data;
+            diagnosticsExpanded = false;
+            renderDiagnosticsPanel();
+        }
+
+        // --- Action buttons ---
         function updateActionButtons(isOn) {
             if (isLoading) return;
             document.getElementById('btnStart').classList.toggle('disabled', isOn);
@@ -255,7 +611,6 @@
             document.getElementById('rulesV4').textContent = '?';
             document.getElementById('rulesV6').textContent = '?';
             document.getElementById('domainCount').textContent = '?';
-            document.getElementById('ipsetCount').textContent = '?';
 
             const card = document.getElementById('statusCard');
             const dot = document.getElementById('statusDot');
@@ -272,12 +627,12 @@
             }
         }
 
+        // --- CLI execution ---
         async function runCli(args, options = {}) {
             const {
                 loadingText = 'Applying changes...',
                 successText = 'Done',
                 refresh = true,
-                showOutput = false,
                 outputTitle = 'Command Output'
             } = options;
 
@@ -294,29 +649,22 @@
                 const combined = [stdout, stderr].filter(Boolean).join('\n');
                 const ok = res.errno === 0;
 
-                if (showOutput) {
-                    setManualOutput(outputTitle, combined || '(no output)');
-                }
-
                 showToast(ok ? successText : `${successText} failed`);
 
                 if (ok && refresh) {
                     await refreshStatus(true);
-                    if (liveLogEnabled) {
-                        await refreshLog();
+                    if (activePage === 'logs') {
+                        if (activeLogView === 'events') {
+                            await refreshEvents();
+                        } else {
+                            await refreshLog();
+                        }
                     }
-                }
-
-                if (!ok && !showOutput && combined) {
-                    setManualOutput(`${outputTitle} failed`, combined);
                 }
 
                 return { ok, output: combined };
             } catch (error) {
                 showToast(`Error: ${error.message}`);
-                if (showOutput) {
-                    setManualOutput(`${outputTitle} failed`, String(error.message || error));
-                }
                 return { ok: false, output: String(error.message || error) };
             } finally {
                 isLoading = false;
@@ -325,20 +673,7 @@
             }
         }
 
-        async function refreshLog() {
-            if (logRequestInFlight) return;
-            if (!liveLogEnabled) return;
-
-            logRequestInFlight = true;
-            try {
-                const res = await exec(`tail -n 50 ${MODDIR}/nzapret.log 2>/dev/null || echo "No active log"`);
-                liveLogText = (res.stdout || 'No output').trim() || 'No output';
-                renderActivity();
-            } finally {
-                logRequestInFlight = false;
-            }
-        }
-
+        // --- Status polling ---
         function startStatusPolling() {
             if (statusInterval) clearInterval(statusInterval);
             statusInterval = setInterval(() => {
@@ -355,12 +690,30 @@
                     refreshLog();
                 }
             }, LOG_POLL_MS);
+            updateStatusBar();
         }
 
         function stopLogPolling() {
             if (logInterval) {
                 clearInterval(logInterval);
                 logInterval = null;
+            }
+            updateStatusBar();
+        }
+
+        function startEventsPolling() {
+            if (eventsInterval) return;
+            eventsInterval = setInterval(() => {
+                if (!document.hidden) {
+                    refreshEvents();
+                }
+            }, EVENTS_POLL_MS);
+        }
+
+        function stopEventsPolling() {
+            if (eventsInterval) {
+                clearInterval(eventsInterval);
+                eventsInterval = null;
             }
         }
 
@@ -390,7 +743,6 @@
                 document.getElementById('rulesV4').textContent = status.rules_v4 ?? 0;
                 document.getElementById('rulesV6').textContent = status.rules_v6 ?? 0;
                 document.getElementById('domainCount').textContent = fmt(status.domain_count ?? 0);
-                document.getElementById('ipsetCount').textContent = fmt(status.ipset_count ?? 0);
                 updateProfileSlider(status.profile);
 
                 const card = document.getElementById('statusCard');
@@ -418,6 +770,7 @@
             }
         }
 
+        // --- Actions ---
         async function doAction(command) {
             const primary = command.split(' ')[0];
             const buttonMap = {
@@ -438,27 +791,16 @@
             if (button && button.classList.contains('disabled')) return;
             if (button) button.classList.add('loading');
 
-            const result = await runCli(command, {
+            await runCli(command, {
                 loadingText: loadingMap[primary] || 'Applying changes...',
-                successText: `${command} completed`
+                successText: `${command} completed`,
+                outputTitle: command
             });
 
             if (button) button.classList.remove('loading');
-            if (!result.ok && result.output) {
-                setManualOutput(`${command} output`, result.output);
-            }
         }
 
-        async function runInfoCommand(command, loadingText) {
-            await runCli(command, {
-                loadingText,
-                successText: `${command} completed`,
-                refresh: command === 'diagnose',
-                showOutput: true,
-                outputTitle: command
-            });
-        }
-
+        // --- Profile slider ---
         async function updateProfileSlider(activeProfile) {
             const slider = document.getElementById('profileSlider');
             if (!slider) return;
@@ -467,18 +809,14 @@
                 try {
                     const res = await exec(`${CLI} profile list`);
                     const lines = (res.stdout || '').trim().split('\n');
-                    
-                    // Clear existing (but keep glider)
-                    const glider = document.getElementById('profileGlider');
                     slider.innerHTML = '';
-                    slider.appendChild(glider);
 
                     lines.forEach(line => {
                         if (!line || line.includes('no profiles found')) return;
                         const parts = line.split('\t');
                         const name = parts[0];
                         const label = parts[1] || name;
-                        
+
                         const btn = document.createElement('button');
                         btn.className = 'profile-item';
                         btn.textContent = label;
@@ -487,102 +825,101 @@
                         slider.appendChild(btn);
                     });
                     profilesLoaded = true;
-                    // Initial glider setup after render
-                    setTimeout(() => moveGlider(activeProfile), 50);
                 } catch (error) {
                     console.error('Failed to load profiles:', error);
                     return;
                 }
             }
-            
-            // Highlight active and move glider
+
             const items = slider.querySelectorAll('.profile-item');
             items.forEach(item => {
                 item.classList.toggle('active', item.dataset.profile === activeProfile);
             });
-            moveGlider(activeProfile);
-        }
-
-        function moveGlider(activeProfile) {
-            const slider = document.getElementById('profileSlider');
-            const glider = document.getElementById('profileGlider');
-            if (!slider || !glider) return;
-
-            const activeBtn = slider.querySelector(`.profile-item[data-profile="${activeProfile}"]`);
-            if (activeBtn) {
-                glider.style.display = 'block';
-                glider.style.width = `${activeBtn.offsetWidth}px`;
-                glider.style.transform = `translateX(${activeBtn.offsetLeft - 4}px)`;
-            } else {
-                glider.style.display = 'none';
-            }
         }
 
         async function setProfile(name) {
             if (isLoading || (currentStatus && currentStatus.profile === name)) return;
-            
+
             const result = await runCli(`profile set ${shellQuote(name)}`, {
                 loadingText: 'Changing profile...',
                 successText: 'Profile set',
-                showOutput: true,
                 outputTitle: 'profile set'
             });
             if (result.ok) {
                 showToast('Restart nzapret to apply changes');
-                // Opt-initially move glider for better feedback
-                moveGlider(name);
                 const items = document.querySelectorAll('.profile-item');
                 items.forEach(i => i.classList.toggle('active', i.dataset.profile === name));
             }
         }
 
-        async function toggleLiveLog() {
-            liveLogEnabled = !liveLogEnabled;
-            const button = document.getElementById('btnLiveLog');
-            button.classList.toggle('active', liveLogEnabled);
-            button.textContent = liveLogEnabled ? 'Stop Live' : 'Live Log';
+        // --- Event log clearing ---
+        async function clearEventsLog() {
+            if (activeLogView !== 'events' || isLoading) return;
 
-            if (liveLogEnabled) {
-                liveLogText = 'Loading...';
-                renderActivity();
-                await refreshLog();
-                startLogPolling();
-            } else {
-                stopLogPolling();
-                renderActivity();
+            const button = document.getElementById('btnClearEvents');
+            if (button.classList.contains('loading')) return;
+
+            button.classList.add('loading');
+
+            try {
+                setUiLocked(true, 'Clearing event history...');
+                await waitForPaint();
+
+                const res = await exec(`${CLI} events clear`);
+                const ok = res.errno === 0;
+
+                if (!ok) {
+                    throw new Error((res.stderr || res.stdout || 'Failed to clear event log.').trim());
+                }
+
+                eventsData = [];
+                lastEventsPayload = '[]';
+                renderEventsPane();
+                updateLogMeta();
+                updateStatusBar();
+                showToast('Event history cleared');
+                await refreshEvents();
+            } catch (error) {
+                showToast(`Clear failed: ${error.message}`);
+            } finally {
+                button.classList.remove('loading');
+                setUiLocked(false);
             }
         }
 
-        function clearOutput() {
-            manualOutputTitle = '';
-            manualOutputText = '';
-            liveLogText = '';
-            renderActivity();
-        }
-
+        // --- Visibility and resize ---
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) {
                 refreshStatus();
-                if (liveLogEnabled) {
-                    refreshLog();
+                if (activePage === 'logs') {
+                    if (activeLogView === 'runtime') {
+                        refreshLog();
+                    } else {
+                        refreshEvents();
+                    }
                 }
             }
+            syncLogPolling();
         });
 
-        window.addEventListener('resize', () => {
-            if (currentStatus && currentStatus.profile) {
-                moveGlider(currentStatus.profile);
-            }
-        });
+        window.addEventListener('resize', updateLogPanelHeight);
 
+        // --- Exports ---
         window.doAction = doAction;
-        window.runInfoCommand = runInfoCommand;
+        window.setPage = setPage;
         window.setProfile = setProfile;
-        window.toggleLiveLog = toggleLiveLog;
-        window.clearOutput = clearOutput;
+        window.setLogView = setLogView;
+        window.clearEventsLog = clearEventsLog;
+        window.runDiagnose = runDiagnose;
+        window.toggleDiagnosticsDetails = toggleDiagnosticsDetails;
+        window.clearDiagnostics = clearDiagnostics;
+        window.jumpToBottom = jumpToBottom;
 
+        // --- Init ---
+        setupScrollTracking();
         startStatusPolling();
-        renderActivity();
+        renderPages();
+        renderLogView();
         refreshStatus();
     </script>
 </body>

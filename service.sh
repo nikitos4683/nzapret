@@ -8,6 +8,7 @@ IPT="iptables -w"
 IP6T="ip6tables -w"
 CHAIN="nzapret_out"
 LOGFILE="$MODDIR/nzapret.log"
+EVENTLOG="$MODDIR/nzapret-events.log"
 UTILS="$MODDIR/utils"
 LISTS="$MODDIR/lists"
 PAYLOADS="$MODDIR/payloads"
@@ -18,13 +19,15 @@ DEFAULT_PROFILE="default"
 START_MODE="${1:-boot}"
 
 # Utilities
-log() {
-    echo "[nzapret] $*" >> "$LOGFILE"
+log_event() {
+    _etype="$1"; shift
+    _ets=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "----")
+    printf '%s %-8s %s\n' "$_ets" "$_etype" "$*" >> "$EVENTLOG"
 }
 
 # Emergency exit: rolls back iptables and kills nfqws to prevent unstable state.
 fail() {
-    log "ERROR: $*"
+    log_event ERROR "$*"
     cleanup_tables 2>/dev/null
     killall nfqws 2>/dev/null
     exit 1
@@ -189,15 +192,22 @@ add_nfqueue_rule() {
         || fail "$_tbl add $_proto ports $_cur_ports"
 }
 
-# Rotate log - keep previous for debugging.
+# Rotate nfqws runtime log — keep previous for debugging.
 [ -f "$LOGFILE" ] && mv -f "$LOGFILE" "$LOGFILE.prev" 2>/dev/null
 : > "$LOGFILE"
-log "service start (mode: $START_MODE)"
+
+# Trim event log to last 200 entries.
+if [ -f "$EVENTLOG" ]; then
+    _evtmp=$(tail -n 200 "$EVENTLOG")
+    printf '%s\n' "$_evtmp" > "$EVENTLOG"
+fi
+
+log_event START "service started (mode: $START_MODE)"
 
 # Wait for system boot
 if [ "$START_MODE" = "manual" ]; then
     if [ "$(getprop sys.boot_completed)" != "1" ]; then
-        log "manual start requested before boot completion, waiting for boot"
+        log_event INFO "manual start before boot completion, waiting"
         until [ "$(getprop sys.boot_completed)" = "1" ]; do
             sleep 1
         done
@@ -219,11 +229,6 @@ mkdir -p "$UTILS" "$PROFILE_DIR" "$LISTS" || fail "mkdir -p failed"
 require_file "$BIN"
 chmod +x "$BIN" || fail "chmod +x $BIN"
 
-# Create user lists on first run
-[ -f "$LISTS/list-general-user.txt" ] || echo "domain.example.abc" > "$LISTS/list-general-user.txt"
-[ -f "$LISTS/list-exclude-user.txt" ] || echo "domain.example.abc" > "$LISTS/list-exclude-user.txt"
-[ -f "$LISTS/ipset-exclude-user.txt" ] || echo "203.0.113.113/32" > "$LISTS/ipset-exclude-user.txt"
-
 # Check required files
 require_file "$LISTS/list-general.txt"
 require_file "$LISTS/list-google.txt"
@@ -232,7 +237,7 @@ require_file "$PAYLOADS/tls_clienthello_www_google_com.bin"
 
 # Load profile
 load_profile
-log "profile: $ACTIVE_PROFILE ($PROFILE_LABEL)"
+log_event PROFILE "loaded $ACTIVE_PROFILE ($PROFILE_LABEL)"
 
 # Stop previous instance
 killall nfqws 2>/dev/null
@@ -269,11 +274,11 @@ $IPT  -t mangle -C FORWARD -j "$CHAIN" >/dev/null 2>&1 || fail "iptables FORWARD
 $IP6T -t mangle -C OUTPUT -j "$CHAIN" >/dev/null 2>&1 || fail "ip6tables OUTPUT jump missing after apply"
 $IP6T -t mangle -C FORWARD -j "$CHAIN" >/dev/null 2>&1 || fail "ip6tables FORWARD jump missing after apply"
 
-log "nfqws command line prepared from profile $ACTIVE_PROFILE"
+log_event IPTABLES "chains created, rules applied from profile $ACTIVE_PROFILE"
 
 # Start nfqws
 NFQWS_PID=$(start_nfqws_from_profile)
 [ -n "$NFQWS_PID" ] || fail "nfqws did not start"
 sleep 1
 kill -0 "$NFQWS_PID" 2>/dev/null || fail "nfqws exited immediately, see $LOGFILE"
-log "nfqws started with pid $NFQWS_PID"
+log_event NFQWS "started (pid: $NFQWS_PID)"

@@ -3,7 +3,6 @@ nzapret-*.zip
 Thumbs.db
 .DS_Store
 .list_count
-.ipset_count
-.debug_monitor.pid
 nzapret.log
 nzapret.log.prev
+nzapret-events.log

@@ -33,7 +33,7 @@
 - **Android-first архитектура.** Проект не пытается быть переносом ПК-утилиты один в один.
 - **Простой жизненный цикл.** `start`, `stop`, `restart`, `status`, `update`, `log`, `diagnose`.
 - **Честное поведение на boot.** При старте используются только локальные файлы, без автоскачиваний и фоновых чекеров.
-- **Нормальный контроль состояния.** Есть CLI, статус в JSON и WebUI с общим activity log.
+- **Нормальный контроль состояния.** Есть CLI, статус в JSON и WebUI с раздельными runtime и diagnostics логами.
 - **Минимальный surface area.** Убраны мёртвые или полурабочие настройки вроде `game-filter`, `auto-update` и source-редактора.
 
 ## Что умеет сейчас
@@ -42,14 +42,15 @@
 - создавать и чистить IPv4/IPv6 NFQUEUE-цепочки в `mangle`;
 - перехватывать трафик в `OUTPUT` и `FORWARD`;
 - переключать профили обхода;
-- вручную обновлять доменные списки и `ipset`-датасет;
+- вручную обновлять доменный routing list;
 - отдавать состояние в JSON для WebUI;
-- показывать диагностику и live/log output из одного общего UI-блока.
+- показывать отдельный runtime log и отдельный diagnostics log в WebUI.
 
 ## Что важно знать
 
-- В текущем runtime реально используются hostlist-файлы из профиля, прежде всего `list-general.txt` и `list-google.txt`.
-- `ipset-all.txt` поставляется с модулем и умеет обновляться через CLI, но пока не подключён к активному runtime-пути так же глубоко, как hostlists.
+- В текущем runtime реально используются только hostlist-файлы из профиля: `list-general.txt` и `list-google.txt`.
+- Модуль сейчас сосредоточен на hostlist-first модели без отдельной IP-based подсистемы.
+- В поставку входят только те payload-файлы, которые использует активный профиль по умолчанию.
 - В комплекте сейчас один профиль: `default`.
 - KernelSU WebUI встроен в модуль. Если вы используете только Magisk, основной способ управления для вас это CLI и `action.sh`.
 
@@ -75,8 +76,7 @@ sh /data/adb/modules/nzapret/system/bin/nzapret restart
 
 ```sh
 sh /data/adb/modules/nzapret/system/bin/nzapret update list
-sh /data/adb/modules/nzapret/system/bin/nzapret update ipset
-sh /data/adb/modules/nzapret/system/bin/nzapret update all
+sh /data/adb/modules/nzapret/system/bin/nzapret update
 ```
 
 ### Диагностика
@@ -84,7 +84,6 @@ sh /data/adb/modules/nzapret/system/bin/nzapret update all
 ```sh
 sh /data/adb/modules/nzapret/system/bin/nzapret diagnose
 sh /data/adb/modules/nzapret/system/bin/nzapret log
-sh /data/adb/modules/nzapret/system/bin/nzapret check-updates
 ```
 
 ## CLI-команды
@@ -96,13 +95,12 @@ sh /data/adb/modules/nzapret/system/bin/nzapret check-updates
 | `restart` | Полностью перезапускает рантайм |
 | `status` | Показывает состояние в человекочитаемом виде |
 | `status --json` | Отдаёт JSON-статус для WebUI и интеграций |
-| `update [list\|ipset\|all]` | Ручное обновление данных |
+| `update [list]` | Ручное обновление routing hostlist |
 | `profile status` | Показывает текущий профиль |
 | `profile list` | Показывает доступные профили |
 | `profile set <name>` | Переключает активный профиль |
 | `log` | Показывает процесс и последние строки лога |
 | `diagnose` | Запускает Android-side диагностику |
-| `check-updates` | Проверяет наличие новой версии модуля |
 
 ## Как устроен проект
 
@@ -116,8 +114,8 @@ sh /data/adb/modules/nzapret/system/bin/nzapret check-updates
 ### Данные и профили
 
 - [`profiles/`](./profiles) хранит профили `nfqws`.
-- [`lists/`](./lists) хранит hostlists и дополнительные списки.
-- [`payloads/`](./payloads) содержит бинарные TLS/QUIC/STUN payloads.
+- [`lists/`](./lists) хранит только активные hostlists, используемые рантаймом.
+- [`payloads/`](./payloads) содержит только бинарные TLS/QUIC payloads, реально используемые профилем.
 
 ### Интерфейс
 
