@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>nzapret</title>
+    <link rel="stylesheet" type="text/css" href="/internal/insets.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="ui-lock" id="uiLock">
+            <div class="ui-lock-backdrop"></div>
+            <div class="ui-lock-card">
+                <div class="ui-lock-spinner"></div>
+                <div class="ui-lock-text" id="uiLockText">Applying changes...</div>
+            </div>
+        </div>
+
+        <div class="header">
+            <div class="header-left">
+                <div class="logo">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="white"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 2.18l7 3.12v5.7c0 4.83-3.4 9.36-7 10.57V2.18z"/></svg>
+                </div>
+                <div class="header-text">
+                    <h1>nzapret</h1>
+                    <span class="header-version" id="version">...</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="card status-card inactive" id="statusCard">
+            <div class="status-header">
+                <div class="status-indicator">
+                    <div class="status-dot off" id="statusDot"></div>
+                    <span class="status-label off" id="statusLabel">CHECKING...</span>
+                </div>
+                <div class="status-badge" id="pidBadge">PID --</div>
+            </div>
+            <div class="status-grid">
+                <div class="status-item" style="grid-column: 1 / -1;">
+                    <span class="status-item-label">Routing Profile</span>
+                    <span class="status-item-value" id="profileName">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-item-label">Domains</span>
+                    <span class="status-item-value" id="domainCount">0</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-item-label">IP Ranges</span>
+                    <span class="status-item-value" id="ipsetCount">0</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-item-label">IPv4 Rules</span>
+                    <span class="status-item-value" id="rulesV4">0</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-item-label">IPv6 Rules</span>
+                    <span class="status-item-value" id="rulesV6">0</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-title">Runtime</div>
+        <div class="actions action-grid-main">
+            <button class="action-btn" id="btnStart" onclick="doAction('start')">
+                <div class="action-icon start">
+                    <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                </div>
+                <span>Start</span>
+            </button>
+            <button class="action-btn" id="btnStop" onclick="doAction('stop')">
+                <div class="action-icon stop">
+                    <svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+                </div>
+                <span>Stop</span>
+            </button>
+            <button class="action-btn" id="btnRestart" onclick="doAction('restart')">
+                <div class="action-icon restart">
+                    <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                </div>
+                <span>Restart</span>
+            </button>
+            <button class="action-btn" id="btnUpdate" onclick="doAction('update all')">
+                <div class="action-icon update">
+                    <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                </div>
+                <span>Update All</span>
+            </button>
+        </div>
+
+        <div class="card utility-card">
+            <div class="panel-head">
+                <div>
+                    <div class="panel-title">Maintenance</div>
+                    <div class="panel-subtitle">Manual updates and diagnostics</div>
+                </div>
+            </div>
+            <div class="mini-actions">
+                <button class="mini-btn" onclick="doAction('update list')">Update List</button>
+                <button class="mini-btn" onclick="doAction('update ipset')">Update IPSet</button>
+                <button class="mini-btn" onclick="runInfoCommand('check-updates', 'Checking for updates...')">Check Updates</button>
+                <button class="mini-btn" onclick="runInfoCommand('diagnose', 'Running diagnostics...')">Diagnose</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="panel-head">
+                <div>
+                    <div class="panel-title">Routing Profile</div>
+                    <div class="panel-subtitle">Choose the active bypass strategy</div>
+                </div>
+            </div>
+
+            <div class="control-block">
+                <div class="control-row">
+                    <div>
+                        <div class="control-title">Routing Profile</div>
+                        <div class="control-note">Active bypass strategy (requires restart)</div>
+                    </div>
+                </div>
+                <div class="profile-slider-container">
+                    <div class="profile-slider" id="profileSlider">
+                        <div class="glider" id="profileGlider" style="display: none;"></div>
+                        <!-- Items injected by JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card output-card">
+            <div class="panel-head">
+                <div>
+                    <div class="panel-title">Activity Log</div>
+                    <div class="panel-subtitle" id="activityMeta">Manual command output and nfqws log in one view</div>
+                </div>
+                <div class="panel-actions">
+                    <button class="icon-btn" id="btnLiveLog" onclick="toggleLiveLog()">Live Log</button>
+                    <button class="icon-btn" onclick="clearOutput()">Clear</button>
+                </div>
+            </div>
+            <pre class="output-text" id="activityText">No output yet.</pre>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script type="module">
+        import { exec } from './kernelsu.js';
+
+        const MODDIR = '/data/adb/modules/nzapret';
+        const CLI = `sh ${MODDIR}/system/bin/nzapret`;
+        const STATUS_POLL_MS = 5000;
+        const LOG_POLL_MS = 3000;
+
+        let isLoading = false;
+        let statusInterval = null;
+        let logInterval = null;
+        let hasShownStatusError = false;
+        let statusRequestInFlight = false;
+        let logRequestInFlight = false;
+        let liveLogEnabled = false;
+        let manualOutputTitle = '';
+        let manualOutputText = '';
+        let liveLogText = '';
+        let currentStatus = null;
+        let profilesLoaded = false;
+
+        function shellQuote(value) {
+            return "'" + String(value).replace(/'/g, "'\\''") + "'";
+        }
+
+        function setUiLocked(locked, message = 'Applying changes...') {
+            const overlay = document.getElementById('uiLock');
+            const text = document.getElementById('uiLockText');
+            text.textContent = message;
+            overlay.classList.toggle('active', locked);
+            document.body.classList.toggle('ui-busy', locked);
+        }
+
+        function waitForPaint() {
+            return new Promise((resolve) => {
+                requestAnimationFrame(() => requestAnimationFrame(resolve));
+            });
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 2500);
+        }
+
+        function fmt(n) {
+            return parseInt(n || 0, 10).toLocaleString('en-US');
+        }
+
+        function buildActivitySections() {
+            const sections = [];
+
+            if (manualOutputText) {
+                sections.push(`${manualOutputTitle || 'Command Output'}\n${manualOutputText}`);
+            }
+
+            if (liveLogText) {
+                sections.push(`nfqws log\n${liveLogText}`);
+            }
+
+            return sections;
+        }
+
+        function updateActivityMeta() {
+            const parts = [];
+
+            if (manualOutputTitle) {
+                parts.push(manualOutputTitle);
+            }
+
+            if (liveLogEnabled) {
+                parts.push('Live tail enabled');
+            } else if (liveLogText) {
+                parts.push('Live tail snapshot');
+            }
+
+            document.getElementById('activityMeta').textContent = parts.join(' • ') || 'Manual command output and nfqws log in one view';
+        }
+
+        function renderActivity() {
+            const sections = buildActivitySections();
+            document.getElementById('activityText').textContent = sections.length
+                ? sections.join('\n\n────────────────────────────────────────\n\n')
+                : 'No output yet.';
+            updateActivityMeta();
+        }
+
+        function setManualOutput(title, text) {
+            manualOutputTitle = title;
+            manualOutputText = text || '(no output)';
+            renderActivity();
+        }
+
+        function updateActionButtons(isOn) {
+            if (isLoading) return;
+            document.getElementById('btnStart').classList.toggle('disabled', isOn);
+            document.getElementById('btnStop').classList.toggle('disabled', !isOn);
+            document.getElementById('btnRestart').classList.toggle('disabled', !isOn);
+            document.getElementById('btnUpdate').classList.remove('disabled');
+        }
+
+        function applyUnavailableState(reason = 'STATUS ERROR') {
+            currentStatus = null;
+            document.getElementById('pidBadge').textContent = 'PID --';
+            document.getElementById('profileName').textContent = '--';
+            document.getElementById('rulesV4').textContent = '?';
+            document.getElementById('rulesV6').textContent = '?';
+            document.getElementById('domainCount').textContent = '?';
+            document.getElementById('ipsetCount').textContent = '?';
+
+            const card = document.getElementById('statusCard');
+            const dot = document.getElementById('statusDot');
+            const label = document.getElementById('statusLabel');
+
+            card.className = 'card status-card inactive';
+            dot.className = 'status-dot off';
+            label.className = 'status-label off';
+            label.textContent = reason;
+
+            if (!isLoading) {
+                document.querySelectorAll('button').forEach((button) => button.classList.remove('disabled'));
+                updateActionButtons(false);
+            }
+        }
+
+        async function runCli(args, options = {}) {
+            const {
+                loadingText = 'Applying changes...',
+                successText = 'Done',
+                refresh = true,
+                showOutput = false,
+                outputTitle = 'Command Output'
+            } = options;
+
+            if (isLoading) return { ok: false, skipped: true };
+
+            isLoading = true;
+            setUiLocked(true, loadingText);
+            await waitForPaint();
+
+            try {
+                const res = await exec(`${CLI} ${args}`);
+                const stdout = (res.stdout || '').trim();
+                const stderr = (res.stderr || '').trim();
+                const combined = [stdout, stderr].filter(Boolean).join('\n');
+                const ok = res.errno === 0;
+
+                if (showOutput) {
+                    setManualOutput(outputTitle, combined || '(no output)');
+                }
+
+                showToast(ok ? successText : `${successText} failed`);
+
+                if (ok && refresh) {
+                    await refreshStatus(true);
+                    if (liveLogEnabled) {
+                        await refreshLog();
+                    }
+                }
+
+                if (!ok && !showOutput && combined) {
+                    setManualOutput(`${outputTitle} failed`, combined);
+                }
+
+                return { ok, output: combined };
+            } catch (error) {
+                showToast(`Error: ${error.message}`);
+                if (showOutput) {
+                    setManualOutput(`${outputTitle} failed`, String(error.message || error));
+                }
+                return { ok: false, output: String(error.message || error) };
+            } finally {
+                isLoading = false;
+                setUiLocked(false);
+                updateActionButtons(Boolean(currentStatus && currentStatus.active));
+            }
+        }
+
+        async function refreshLog() {
+            if (logRequestInFlight) return;
+            if (!liveLogEnabled) return;
+
+            logRequestInFlight = true;
+            try {
+                const res = await exec(`tail -n 50 ${MODDIR}/nzapret.log 2>/dev/null || echo "No active log"`);
+                liveLogText = (res.stdout || 'No output').trim() || 'No output';
+                renderActivity();
+            } finally {
+                logRequestInFlight = false;
+            }
+        }
+
+        function startStatusPolling() {
+            if (statusInterval) clearInterval(statusInterval);
+            statusInterval = setInterval(() => {
+                if (!document.hidden) {
+                    refreshStatus();
+                }
+            }, STATUS_POLL_MS);
+        }
+
+        function startLogPolling() {
+            if (logInterval) clearInterval(logInterval);
+            logInterval = setInterval(() => {
+                if (!document.hidden) {
+                    refreshLog();
+                }
+            }, LOG_POLL_MS);
+        }
+
+        function stopLogPolling() {
+            if (logInterval) {
+                clearInterval(logInterval);
+                logInterval = null;
+            }
+        }
+
+        async function refreshStatus(force = false) {
+            if ((!force && isLoading) || statusRequestInFlight) return;
+            statusRequestInFlight = true;
+
+            try {
+                const res = await exec(`${CLI} status --json`);
+                const raw = (res.stdout || '').trim();
+                const jsonMatch = raw.match(/\{[\s\S]*\}/);
+
+                if (!jsonMatch) {
+                    throw new Error((raw || res.stderr || 'status command failed').trim());
+                }
+
+                const status = JSON.parse(jsonMatch[0]);
+                const isOn = Boolean(status.active);
+                const pid = status.pid || '--';
+                const pidCount = parseInt(status.pid_count || 0, 10);
+
+                currentStatus = status;
+                hasShownStatusError = false;
+                document.getElementById('version').textContent = status.version || 'unknown';
+                document.getElementById('pidBadge').textContent = pidCount > 1 ? `PID ${pid} +${pidCount - 1}` : `PID ${pid}`;
+                document.getElementById('profileName').textContent = status.profile_label || status.profile || '--';
+                document.getElementById('rulesV4').textContent = status.rules_v4 ?? 0;
+                document.getElementById('rulesV6').textContent = status.rules_v6 ?? 0;
+                document.getElementById('domainCount').textContent = fmt(status.domain_count ?? 0);
+                document.getElementById('ipsetCount').textContent = fmt(status.ipset_count ?? 0);
+                updateProfileSlider(status.profile);
+
+                const card = document.getElementById('statusCard');
+                const dot = document.getElementById('statusDot');
+                const label = document.getElementById('statusLabel');
+
+                card.className = 'card status-card ' + (isOn ? 'active' : 'inactive');
+                dot.className = 'status-dot ' + (isOn ? 'on' : 'off');
+                label.className = 'status-label ' + (isOn ? 'on' : 'off');
+                label.textContent = isOn ? 'ACTIVE' : 'INACTIVE';
+                if (isOn && pidCount > 1) {
+                    label.textContent = 'MULTI-PID';
+                }
+
+                updateActionButtons(isOn);
+            } catch (error) {
+                applyUnavailableState();
+                if (!hasShownStatusError) {
+                    showToast('Status refresh failed');
+                    hasShownStatusError = true;
+                }
+                console.error('Status refresh error:', error);
+            } finally {
+                statusRequestInFlight = false;
+            }
+        }
+
+        async function doAction(command) {
+            const primary = command.split(' ')[0];
+            const buttonMap = {
+                start: 'btnStart',
+                stop: 'btnStop',
+                restart: 'btnRestart',
+                update: 'btnUpdate'
+            };
+            const loadingMap = {
+                start: 'Starting nzapret...',
+                stop: 'Stopping nzapret...',
+                restart: 'Restarting nzapret...',
+                update: 'Updating data...'
+            };
+            const buttonId = buttonMap[primary];
+            const button = buttonId ? document.getElementById(buttonId) : null;
+
+            if (button && button.classList.contains('disabled')) return;
+            if (button) button.classList.add('loading');
+
+            const result = await runCli(command, {
+                loadingText: loadingMap[primary] || 'Applying changes...',
+                successText: `${command} completed`
+            });
+
+            if (button) button.classList.remove('loading');
+            if (!result.ok && result.output) {
+                setManualOutput(`${command} output`, result.output);
+            }
+        }
+
+        async function runInfoCommand(command, loadingText) {
+            await runCli(command, {
+                loadingText,
+                successText: `${command} completed`,
+                refresh: command === 'diagnose',
+                showOutput: true,
+                outputTitle: command
+            });
+        }
+
+        async function updateProfileSlider(activeProfile) {
+            const slider = document.getElementById('profileSlider');
+            if (!slider) return;
+
+            if (!profilesLoaded) {
+                try {
+                    const res = await exec(`${CLI} profile list`);
+                    const lines = (res.stdout || '').trim().split('\n');
+                    
+                    // Clear existing (but keep glider)
+                    const glider = document.getElementById('profileGlider');
+                    slider.innerHTML = '';
+                    slider.appendChild(glider);
+
+                    lines.forEach(line => {
+                        if (!line || line.includes('no profiles found')) return;
+                        const parts = line.split('\t');
+                        const name = parts[0];
+                        const label = parts[1] || name;
+                        
+                        const btn = document.createElement('button');
+                        btn.className = 'profile-item';
+                        btn.textContent = label;
+                        btn.dataset.profile = name;
+                        btn.onclick = () => setProfile(name);
+                        slider.appendChild(btn);
+                    });
+                    profilesLoaded = true;
+                    // Initial glider setup after render
+                    setTimeout(() => moveGlider(activeProfile), 50);
+                } catch (error) {
+                    console.error('Failed to load profiles:', error);
+                    return;
+                }
+            }
+            
+            // Highlight active and move glider
+            const items = slider.querySelectorAll('.profile-item');
+            items.forEach(item => {
+                item.classList.toggle('active', item.dataset.profile === activeProfile);
+            });
+            moveGlider(activeProfile);
+        }
+
+        function moveGlider(activeProfile) {
+            const slider = document.getElementById('profileSlider');
+            const glider = document.getElementById('profileGlider');
+            if (!slider || !glider) return;
+
+            const activeBtn = slider.querySelector(`.profile-item[data-profile="${activeProfile}"]`);
+            if (activeBtn) {
+                glider.style.display = 'block';
+                glider.style.width = `${activeBtn.offsetWidth}px`;
+                glider.style.transform = `translateX(${activeBtn.offsetLeft - 4}px)`;
+            } else {
+                glider.style.display = 'none';
+            }
+        }
+
+        async function setProfile(name) {
+            if (isLoading || (currentStatus && currentStatus.profile === name)) return;
+            
+            const result = await runCli(`profile set ${shellQuote(name)}`, {
+                loadingText: 'Changing profile...',
+                successText: 'Profile set',
+                showOutput: true,
+                outputTitle: 'profile set'
+            });
+            if (result.ok) {
+                showToast('Restart nzapret to apply changes');
+                // Opt-initially move glider for better feedback
+                moveGlider(name);
+                const items = document.querySelectorAll('.profile-item');
+                items.forEach(i => i.classList.toggle('active', i.dataset.profile === name));
+            }
+        }
+
+        async function toggleLiveLog() {
+            liveLogEnabled = !liveLogEnabled;
+            const button = document.getElementById('btnLiveLog');
+            button.classList.toggle('active', liveLogEnabled);
+            button.textContent = liveLogEnabled ? 'Stop Live' : 'Live Log';
+
+            if (liveLogEnabled) {
+                liveLogText = 'Loading...';
+                renderActivity();
+                await refreshLog();
+                startLogPolling();
+            } else {
+                stopLogPolling();
+                renderActivity();
+            }
+        }
+
+        function clearOutput() {
+            manualOutputTitle = '';
+            manualOutputText = '';
+            liveLogText = '';
+            renderActivity();
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                refreshStatus();
+                if (liveLogEnabled) {
+                    refreshLog();
+                }
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            if (currentStatus && currentStatus.profile) {
+                moveGlider(currentStatus.profile);
+            }
+        });
+
+        window.doAction = doAction;
+        window.runInfoCommand = runInfoCommand;
+        window.setProfile = setProfile;
+        window.toggleLiveLog = toggleLiveLog;
+        window.clearOutput = clearOutput;
+
+        startStatusPolling();
+        renderActivity();
+        refreshStatus();
+    </script>
+</body>
+</html>

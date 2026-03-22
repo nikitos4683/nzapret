@@ -1,0 +1,535 @@
+#!/system/bin/sh
+# nzapret — CLI management utility
+# Installed to /system/bin/ via Magisk overlay.
+# Provides commands for controlling nfqws service, updating lists,
+# managing profiles and diagnostics.
+
+MODDIR="/data/adb/modules/nzapret"
+LISTS="$MODDIR/lists"
+PAYLOADS="$MODDIR/payloads"
+BIN="$MODDIR/bin/nfqws"
+CHAIN="nzapret_out"
+LOGFILE="$MODDIR/nzapret.log"
+UTILS="$MODDIR/utils"
+ACTIVE_PROFILE_FILE="$UTILS/profile.current"
+PROFILE_DIR="$MODDIR/profiles"
+DEFAULT_PROFILE="default"
+DEFAULT_LIST_SOURCE="https://raw.githubusercontent.com/bol-van/rulist/refs/heads/main/reestr_hostname.txt"
+DEFAULT_IPSET_SOURCE="https://raw.githubusercontent.com/bol-van/rulist/refs/heads/main/reestr_smart4.txt"
+VERSION_URL="https://raw.githubusercontent.com/nikitos4683/nzapret/refs/heads/main/.service/version.txt"
+RELEASES_URL="https://github.com/nikitos4683/nzapret/releases/latest"
+
+# Domains always appended after a manual list refresh.
+ALWAYS_INCLUDE_DOMAINS="encryptedsni.com adblockplus.org"
+
+# Helpers
+ensure_utils_dir() {
+    mkdir -p "$UTILS" >/dev/null 2>&1
+}
+
+require_cmd() {
+    command -v "$1" >/dev/null 2>&1 || {
+        echo "[-] Missing command: $1"
+        exit 1
+    }
+}
+
+# Process management
+get_first_pid() {
+    pgrep -x "nfqws" 2>/dev/null | head -n 1
+}
+
+get_pid_count() {
+    pgrep -x "nfqws" 2>/dev/null | wc -l | tr -d '[:space:]'
+}
+
+is_running() {
+    [ -n "$(get_first_pid)" ]
+}
+
+# Version
+get_version() {
+    if [ -f "$MODDIR/module.prop" ]; then
+        grep '^version=' "$MODDIR/module.prop" | cut -d= -f2 | tr -d '\r\n'
+    fi
+}
+
+# Normalize version string: strip leading 'v' and whitespace.
+normalize_version() {
+    printf '%s' "$1" | tr -d '[:space:]' | sed 's/^v//'
+}
+
+# Profiles
+get_active_profile() {
+    if [ -f "$ACTIVE_PROFILE_FILE" ]; then
+        _pname=$(head -n 1 "$ACTIVE_PROFILE_FILE" 2>/dev/null | tr -d '\r\n')
+        [ -n "$_pname" ] && {
+            echo "$_pname"
+            return
+        }
+    fi
+    echo "$DEFAULT_PROFILE"
+}
+
+get_profile_config_file() {
+    echo "$PROFILE_DIR/$1.conf"
+}
+
+profile_exists() {
+    [ -f "$(get_profile_config_file "$1")" ]
+}
+
+get_profile_label() {
+    _pname="$1"
+    _plabel="$_pname"
+    _pconfig=$(get_profile_config_file "$_pname")
+
+    if [ -f "$_pconfig" ]; then
+        _pline=$(grep -m 1 '^# profile:' "$_pconfig" 2>/dev/null)
+        if [ -n "$_pline" ]; then
+            _plabel=$(printf '%s' "$_pline" | sed 's/^# profile:[[:space:]]*//')
+        fi
+    fi
+
+    echo "$_plabel"
+}
+
+set_active_profile() {
+    _pname="$1"
+    profile_exists "$_pname" || {
+        echo "[-] Unknown profile: $_pname"
+        exit 1
+    }
+    ensure_utils_dir
+    printf '%s\n' "$_pname" > "$ACTIVE_PROFILE_FILE"
+}
+
+list_profiles() {
+    _found=0
+    for _pconfig in "$PROFILE_DIR"/*.conf; do
+        [ -f "$_pconfig" ] || continue
+        _pname=$(basename "$_pconfig" .conf)
+        printf '%s\t%s\n' "$_pname" "$(get_profile_label "$_pname")"
+        _found=1
+    done
+    [ "$_found" = "1" ] || echo "(no profiles found)"
+}
+
+# Counters with cache
+get_list_count() {
+    _cache_file="$1"
+    _list_file="$2"
+    _force="$3"
+
+    # Return cached value unless forced refresh.
+    if [ "$_force" != "1" ] && [ -f "$_cache_file" ]; then
+        cat "$_cache_file"
+        return
+    fi
+
+    if [ -f "$_list_file" ]; then
+        _count=$(wc -l < "$_list_file" 2>/dev/null || echo 0)
+    else
+        _count=0
+    fi
+
+    echo "$_count" > "$_cache_file" 2>/dev/null
+    echo "$_count"
+}
+
+refresh_counts() {
+    get_list_count "$MODDIR/.list_count" "$LISTS/list-general.txt" 1 >/dev/null
+    get_list_count "$MODDIR/.ipset_count" "$LISTS/ipset-all.txt" 1 >/dev/null
+}
+
+# Status printers
+
+print_profile_status() {
+    _pname=$(get_active_profile)
+    echo "Active profile: $_pname ($(get_profile_label "$_pname"))"
+}
+
+# JSON helper
+json_escape() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+print_status_human() {
+    _ver=$(get_version)
+    _pid=$(get_first_pid)
+    _pid_count=$(get_pid_count)
+    _rules=$(get_rule_count iptables)
+    _rules6=$(get_rule_count ip6tables)
+    _lc=$(get_list_count "$MODDIR/.list_count" "$LISTS/list-general.txt")
+    _ic=$(get_list_count "$MODDIR/.ipset_count" "$LISTS/ipset-all.txt")
+
+    [ -n "$_ver" ] && echo "Module version: $_ver"
+
+    if [ -n "$_pid" ]; then
+        echo "nfqws: [ON] (PID: $_pid)"
+        [ "$_pid_count" -gt 1 ] && echo "warning: multiple nfqws processes detected ($_pid_count)"
+    else
+        echo "nfqws: [OFF]"
+    fi
+
+    echo "iptables rules: $_rules (IPv4), $_rules6 (IPv6)"
+    print_profile_status
+    echo ""
+
+    if [ -f "$LISTS/list-general.txt" ]; then
+        echo "list-general.txt: $_lc domains"
+    else
+        echo "list-general.txt: MISSING"
+    fi
+
+    if [ -f "$LISTS/ipset-all.txt" ]; then
+        echo "ipset-all.txt: $_ic entries"
+    else
+        echo "ipset-all.txt: MISSING"
+    fi
+}
+
+print_status_json() {
+    _pid=$(get_first_pid)
+    _pid_count=$(get_pid_count)
+    if [ -n "$_pid" ]; then
+        _active=true
+    else
+        _active=false
+    fi
+
+    _ver=$(get_version)
+    _rules=$(get_rule_count iptables)
+    _rules6=$(get_rule_count ip6tables)
+    _lc=$(get_list_count "$MODDIR/.list_count" "$LISTS/list-general.txt")
+    _ic=$(get_list_count "$MODDIR/.ipset_count" "$LISTS/ipset-all.txt")
+    _prof_name=$(get_active_profile)
+    _prof_label=$(get_profile_label "$_prof_name")
+
+    printf '{"version":"%s","active":%s,"pid":"%s","pid_count":%s,"rules_v4":%s,"rules_v6":%s,"domain_count":%s,"ipset_count":%s,"profile":"%s","profile_label":"%s"}\n' \
+        "$(json_escape "$_ver")" "$_active" "$(json_escape "$_pid")" "$_pid_count" "$_rules" "$_rules6" "$_lc" "$_ic" "$(json_escape "$_prof_name")" "$(json_escape "$_prof_label")"
+}
+
+get_rule_count() {
+    _tbl_cmd="$1"
+    $_tbl_cmd -t mangle -L "$CHAIN" -n 2>/dev/null | grep -c NFQUEUE
+}
+
+# Service control
+start_service() {
+    sh "$MODDIR/service.sh" manual || return 1
+    is_running
+}
+
+stop_service() {
+    sh "$MODDIR/uninstall.sh" || return 1
+    is_running && return 1
+    # Verify all chains are fully removed (OUTPUT + FORWARD).
+    iptables -t mangle -C OUTPUT -j "$CHAIN" >/dev/null 2>&1 && return 1
+    iptables -t mangle -C FORWARD -j "$CHAIN" >/dev/null 2>&1 && return 1
+    ip6tables -t mangle -C OUTPUT -j "$CHAIN" >/dev/null 2>&1 && return 1
+    ip6tables -t mangle -C FORWARD -j "$CHAIN" >/dev/null 2>&1 && return 1
+    return 0
+}
+
+# Safe download (uses tmp file + size check + HTTP error protection)
+download_to_tmp() {
+    _url="$1"
+    _dest="$2"
+    _label="$3"
+    _tmp=$(mktemp 2>/dev/null || echo "/data/local/tmp/$(basename "$_dest").tmp")
+
+    curl -s -f -L -o "$_tmp" "$_url" 2>/dev/null
+    if [ -s "$_tmp" ]; then
+        mv -f "$_tmp" "$_dest"
+        echo "[+] $_label updated"
+        return 0
+    fi
+
+    rm -f "$_tmp"
+    echo "[-] Failed to download $_label"
+    return 1
+}
+
+update_list_file() {
+    if download_to_tmp "$DEFAULT_LIST_SOURCE" "$LISTS/list-general.txt" "list-general.txt"; then
+        printf '%s\n' $ALWAYS_INCLUDE_DOMAINS >> "$LISTS/list-general.txt"
+        return 0
+    fi
+    return 1
+}
+
+update_ipset_file() {
+    download_to_tmp "$DEFAULT_IPSET_SOURCE" "$LISTS/ipset-all.txt" "ipset-all.txt"
+}
+
+restart_if_running() {
+    if is_running; then
+        echo "[*] Restarting nfqws to apply changes..."
+        exec "$0" restart
+    fi
+    echo "[*] nzapret is not running. Changes will apply on next start."
+    exit 0
+}
+
+# Diagnostics
+run_diagnose() {
+    echo "nzapret diagnostics"
+    echo "--------------------"
+
+    for _cmd in iptables ip6tables pgrep tail curl; do
+        if command -v "$_cmd" >/dev/null 2>&1; then
+            echo "[OK] command available: $_cmd"
+        else
+            echo "[!!] missing command: $_cmd"
+        fi
+    done
+
+    for _file in \
+        "$BIN" \
+        "$LISTS/list-general.txt" \
+        "$LISTS/list-google.txt" \
+        "$LISTS/list-exclude.txt" \
+        "$LISTS/ipset-all.txt" \
+        "$LISTS/ipset-exclude.txt" \
+        "$PAYLOADS/quic_initial_www_google_com.bin" \
+        "$PAYLOADS/tls_clienthello_www_google_com.bin" \
+        "$PAYLOADS/tls_clienthello_max_ru.bin" \
+        "$PAYLOADS/stun.bin"; do
+        if [ -f "$_file" ]; then
+            echo "[OK] file present: $_file"
+        else
+            echo "[!!] missing file: $_file"
+        fi
+    done
+
+    _pid=$(get_first_pid)
+    if [ -n "$_pid" ]; then
+        echo "[OK] nfqws running (PID: $_pid)"
+    else
+        echo "[!!] nfqws is not running"
+    fi
+
+    # Check all jump rules (OUTPUT + FORWARD)
+    for _chain in OUTPUT FORWARD; do
+        if iptables -t mangle -C "$_chain" -j "$CHAIN" >/dev/null 2>&1; then
+            echo "[OK] iptables $_chain jump present"
+        else
+            echo "[!!] iptables $_chain jump missing"
+        fi
+
+        if ip6tables -t mangle -C "$_chain" -j "$CHAIN" >/dev/null 2>&1; then
+            echo "[OK] ip6tables $_chain jump present"
+        else
+            echo "[!!] ip6tables $_chain jump missing"
+        fi
+    done
+
+    if command -v ip >/dev/null 2>&1; then
+        if ip route 2>/dev/null | grep -q '^default '; then
+            echo "[OK] IPv4 default route present"
+        else
+            echo "[!!] IPv4 default route missing"
+        fi
+
+        if ip -6 route 2>/dev/null | grep -q '^default '; then
+            echo "[OK] IPv6 default route present"
+        else
+            echo "[!!] IPv6 default route missing"
+        fi
+    fi
+
+    print_profile_status
+
+    echo ""
+    echo "Last 20 log lines:"
+    if [ -f "$LOGFILE" ]; then
+        tail -n 20 "$LOGFILE"
+    else
+        echo "Log file not found."
+    fi
+}
+
+# Entry point
+ensure_utils_dir
+
+[ $# -eq 0 ] && {
+    set -- status
+}
+
+case "$1" in
+    "start")
+        if is_running; then
+            echo "[!] nfqws is already running. Use 'nzapret restart' instead."
+            exit 1
+        fi
+        echo "[*] Starting nzapret..."
+        if start_service; then
+            _pid=$(get_first_pid)
+            echo "[+] nfqws started successfully (PID: $_pid)"
+        else
+            echo "[-] Failed to start nfqws. Check 'nzapret log' for details."
+            exit 1
+        fi
+        ;;
+
+    "stop")
+        echo "[*] Stopping nzapret..."
+        if stop_service; then
+            echo "[+] Stopped"
+        else
+            echo "[-] Failed to stop cleanly. Check 'nzapret log' for details."
+            exit 1
+        fi
+        ;;
+
+    "restart")
+        echo "[*] Restarting nzapret..."
+        if ! stop_service; then
+            echo "[-] Failed to stop current nfqws instance cleanly."
+            exit 1
+        fi
+        if start_service; then
+            _pid=$(get_first_pid)
+            echo "[+] nfqws restarted successfully (PID: $_pid)"
+        else
+            echo "[-] Failed to restart nfqws. Check 'nzapret log' for details."
+            exit 1
+        fi
+        ;;
+
+    "update")
+        require_cmd curl
+        case "$2" in
+            ""|"all")
+                _updated=0
+                echo "[*] Updating list-general.txt..."
+                update_list_file && _updated=1
+                echo "[*] Updating ipset-all.txt..."
+                update_ipset_file && _updated=1
+                refresh_counts
+                [ "$_updated" = "1" ] || {
+                    echo "[-] No files were updated."
+                    exit 1
+                }
+                restart_if_running
+                ;;
+            "list")
+                echo "[*] Updating list-general.txt..."
+                update_list_file || exit 1
+                refresh_counts
+                restart_if_running
+                ;;
+            "ipset")
+                echo "[*] Updating ipset-all.txt..."
+                update_ipset_file || exit 1
+                refresh_counts
+                restart_if_running
+                ;;
+            *)
+                echo "Usage: nzapret update [list|ipset|all]"
+                exit 1
+                ;;
+        esac
+        ;;
+
+    "status")
+        case "$2" in
+            "--json") print_status_json ;;
+            *)        print_status_human ;;
+        esac
+        ;;
+
+    "log")
+        _pid=$(get_first_pid)
+        _pid_count=$(get_pid_count)
+        if [ -n "$_pid" ] && [ -d "/proc/$_pid" ]; then
+            echo "nfqws is running (PID: $_pid)"
+            [ "$_pid_count" -gt 1 ] && echo "warning: multiple nfqws processes detected ($_pid_count)"
+            echo "Cmdline:"
+            cat /proc/$_pid/cmdline 2>/dev/null | tr '\0' ' '
+            echo ""
+            echo ""
+            echo "Open files: $(ls /proc/$_pid/fd 2>/dev/null | wc -l)"
+            echo "Memory: $(grep VmRSS /proc/$_pid/status 2>/dev/null)"
+        else
+            echo "nfqws is not running"
+        fi
+
+        echo ""
+        echo "Last 50 lines of logs:"
+        if [ -f "$LOGFILE" ]; then
+            tail -n 50 "$LOGFILE"
+        else
+            echo "Log file not found."
+        fi
+        ;;
+
+    "check-updates")
+        require_cmd curl
+        echo "[*] Checking for updates..."
+        _remote_raw=$(curl -s -f -L "$VERSION_URL" 2>/dev/null)
+        if [ -z "$_remote_raw" ]; then
+            echo "[-] Failed to check (no internet or server unavailable)"
+            exit 1
+        fi
+        _local_ver=$(normalize_version "$(get_version)")
+        _remote_ver=$(normalize_version "$_remote_raw")
+        echo "Installed: v$_local_ver"
+        echo "Latest:    v$_remote_ver"
+        if [ "$_local_ver" = "$_remote_ver" ]; then
+            echo "[+] You are up to date"
+        else
+            echo "[!] New version available: v$_remote_ver"
+            echo "    Download: $RELEASES_URL"
+        fi
+        ;;
+
+    "profile")
+        case "$2" in
+            ""|"status")
+                print_profile_status
+                ;;
+            "list")
+                list_profiles
+                ;;
+            "set")
+                [ -n "$3" ] || {
+                    echo "Usage: nzapret profile set <name>"
+                    exit 1
+                }
+                set_active_profile "$3"
+                echo "[+] Active profile set to: $3"
+                echo "[*] Restart nzapret to apply changes"
+                ;;
+            *)
+                echo "Usage: nzapret profile [status|list|set <name>]"
+                exit 1
+                ;;
+        esac
+        ;;
+
+    "diagnose")
+        run_diagnose
+        ;;
+
+    "help"|"--help"|"-h"|*)
+        echo "nzapret Management Utility (Magisk)"
+        echo "Usage: nzapret <command> [options]"
+        echo ""
+        echo "Commands:"
+        echo "  start                       - start traffic interception"
+        echo "  stop                        - stop interception and clear rules"
+        echo "  restart                     - restart nfqws and iptables rules"
+        echo "  update [list|ipset|all]     - update routing lists"
+        echo "  status                      - show nfqws, iptables and list info"
+        echo "  status --json               - machine-readable status for WebUI"
+        echo "  log                         - show nfqws process details"
+        echo "  check-updates               - check for new module version"
+        echo "  profile <subcommand>        - show, list or switch nfqws profiles"
+        echo "  diagnose                    - run Android-side diagnostics"
+        echo "  help                        - show this help message"
+        echo ""
+        echo "Profile commands: status, list, set <name>"
+        ;;
+esac
