@@ -107,13 +107,17 @@
                         <!-- Items injected by JS -->
                     </div>
                 </div>
+
+                <div class="tools-support-line">
+                    Profile changes are saved immediately and applied after restart.
+                </div>
             </div>
 
             <div class="card" id="diagCard">
                 <div class="panel-head">
                     <div>
                         <div class="panel-title">Diagnostics</div>
-                        <div class="panel-subtitle">Inspect current runtime state</div>
+                        <div class="panel-subtitle">Inspect current runtime state before diving into raw logs.</div>
                     </div>
                     <button class="diag-run-btn" id="btnDiagnose" onclick="runDiagnose()">
                         <span class="diag-run-btn-icon" aria-hidden="true">
@@ -121,6 +125,16 @@
                         </span>
                         <span class="diag-run-btn-label">Run Diagnose</span>
                     </button>
+                </div>
+
+                <div class="diag-empty-state" id="diagEmptyState">
+                    <div class="diag-empty-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M12 2.75l7.5 3v5.55c0 4.63-3.08 8.95-7.5 9.95-4.42-1-7.5-5.32-7.5-9.95V5.75l7.5-3zm0 4.32a1.03 1.03 0 00-1.03 1.03v4.54a1.03 1.03 0 102.06 0V8.1A1.03 1.03 0 0012 7.07zm0 9.08a1.17 1.17 0 100-2.34 1.17 1.17 0 000 2.34z"/></svg>
+                    </div>
+                    <div class="diag-empty-copy">
+                        <div class="diag-empty-title">No diagnostic snapshot yet</div>
+                        <div class="diag-empty-text">Run a health check to confirm the process, firewall chains, and other live signals before chasing raw output.</div>
+                    </div>
                 </div>
 
                 <div class="diag-results" id="diagResults" hidden>
@@ -369,14 +383,18 @@
             const checklistShell = document.getElementById('diagChecklistShell');
             const checklist = document.getElementById('diagChecklist');
             const summary = document.getElementById('diagSummary');
+            const emptyState = document.getElementById('diagEmptyState');
 
             if (!diagnosticsData) {
+                emptyState.hidden = false;
                 results.hidden = true;
                 checklistShell.hidden = true;
                 checklist.innerHTML = '';
                 summary.innerHTML = '';
                 return;
             }
+
+            emptyState.hidden = true;
 
             const s = diagnosticsData.summary || { ok: 0, fail: 0, total: 0 };
             const checks = diagnosticsData.checks || [];
@@ -818,8 +836,12 @@
                         const label = parts[1] || name;
 
                         const btn = document.createElement('button');
+                        btn.type = 'button';
                         btn.className = 'profile-item';
-                        btn.textContent = label;
+                        btn.innerHTML = `
+                            <span class="profile-item-label">${esc(label)}</span>
+                            <span class="profile-item-meta">${esc(name)}</span>
+                        `;
                         btn.dataset.profile = name;
                         btn.onclick = () => setProfile(name);
                         slider.appendChild(btn);

@@ -77,6 +77,10 @@
     -webkit-tap-highlight-color: transparent;
 }
 
+[hidden] {
+    display: none !important;
+}
+
 body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     background: var(--bg-primary);
@@ -650,37 +654,40 @@ body.ui-busy .icon-btn {
 }
 
 .profile-slider {
-    display: flex;
-    background: var(--bg-input);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+    gap: 8px;
+    position: relative;
+    padding: 4px;
     border: 1px solid var(--border);
     border-radius: 14px;
-    padding: 4px;
-    position: relative;
-    gap: 4px;
-    overflow: hidden;
+    background: var(--bg-input);
 }
 
 .profile-item {
-    flex: 1;
     position: relative;
     z-index: 1;
+    min-height: 54px;
+    padding: 10px 12px;
     border: none;
     background: transparent;
     color: var(--text-secondary);
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 3px;
     font-size: 12px;
     font-weight: 600;
-    padding: 10px 4px;
     cursor: pointer;
-    transition: none;
-    text-align: center;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    transition: all 0.2s ease;
+    text-align: left;
+    line-height: 1.35;
 }
 
 .profile-item.active {
-    background: linear-gradient(135deg, var(--accent), #7c4dff);
-    border-radius: 10px;
+    background: linear-gradient(145deg, var(--accent), #7c4dff);
     color: #ffffff;
     box-shadow: 0 4px 12px var(--accent-glow);
 }
@@ -688,6 +695,32 @@ body.ui-busy .icon-btn {
 .profile-item:not(.active):hover {
     background: rgba(255, 255, 255, 0.04);
     color: var(--text-primary);
+}
+
+.profile-item-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    color: inherit;
+}
+
+.profile-item-meta {
+    display: block;
+    font-size: 10px;
+    font-weight: 500;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text-tertiary);
+}
+
+.profile-item.active .profile-item-meta {
+    color: rgba(255, 255, 255, 0.74);
+}
+
+.tools-support-line {
+    margin-top: 12px;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-secondary);
 }
 
 .icon-btn {
@@ -928,6 +961,10 @@ body.ui-busy .icon-btn {
     margin-bottom: 0;
 }
 
+#pageTools > .card:last-child {
+    margin-bottom: 0;
+}
+
 .log-live-dot {
     width: 6px;
     height: 6px;
@@ -983,6 +1020,52 @@ body.ui-busy .icon-btn {
 }
 
 /* --- Diagnostics checklist --- */
+.diag-empty-state {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-input);
+}
+
+.diag-empty-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.diag-empty-icon svg {
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
+}
+
+.diag-empty-copy {
+    min-width: 0;
+}
+
+.diag-empty-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.diag-empty-text {
+    margin-top: 5px;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+}
+
 .diag-results {
     margin-top: 14px;
 }
@@ -1189,9 +1272,17 @@ body.ui-busy .icon-btn {
         flex-direction: column;
     }
 
+    .profile-slider {
+        grid-template-columns: 1fr;
+    }
+
     .diag-summary {
         flex-direction: column;
         align-items: stretch;
+    }
+
+    .diag-empty-state {
+        flex-direction: column;
     }
 
     .diag-summary-actions {
