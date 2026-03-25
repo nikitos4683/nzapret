@@ -2,78 +2,79 @@
 
 ## Project Summary
 
-This repository contains the module payload for the Android `nzapret` Magisk/KernelSU module. The module bypasses DPI on Android by:
+This repository contains the source tree for the Android `nzapret` Magisk/KernelSU module. The module bypasses DPI on Android by:
 
 - installing an architecture-specific `nfqws` binary,
-- creating IPv4/IPv6 `iptables`/`ip6tables` NFQUEUE rules,
-- launching `nfqws` with arguments from a selected profile,
-- exposing a shell CLI and a small KernelSU WebUI for control and diagnostics.
+- creating IPv4/IPv6 `iptables` and `ip6tables` NFQUEUE rules,
+- launching `nfqws` with arguments from the active profile,
+- exposing a shell CLI and a KernelSU WebUI for control and diagnostics.
 
-This is not a general app repo. Most behavior lives in shell scripts plus static assets and data files.
+This is not a conventional app repository. Most behavior lives in shell scripts plus static assets and packaged data files.
 
 ## Repository Map
 
 - `module.prop`
-  - Module metadata shown by Magisk/KernelSU.
+  - Module metadata and version source for releases.
 - `customize.sh`
-  - Install-time extraction, architecture selection, permission setup.
+  - Install-time extraction, architecture selection, binary rename, and permission setup.
 - `service.sh`
   - Main runtime entrypoint for boot/manual start. Rebuilds firewall state and launches `nfqws`.
 - `uninstall.sh`
-  - Stop/cleanup logic. Used both for uninstall and for CLI `stop`.
+  - Stop/cleanup logic. Used for uninstall and CLI `stop`.
 - `action.sh`
-  - Quick toggle action. Delegates to the CLI.
+  - Quick toggle action for Magisk/KernelSU. Delegates to the CLI.
 - `system/bin/nzapret`
-  - Main CLI for lifecycle control, diagnostics, manual list updates, profile switching, and `status --json` for the WebUI.
+  - Main CLI for lifecycle control, diagnostics, list refresh, profile switching, and JSON output for the WebUI.
 - `profiles/*.conf`
-  - `nfqws` profiles. Only `profiles/default.conf` exists in the current tree.
+  - `nfqws` argument profiles. The current tree ships `profiles/default.conf`.
 - `lists/`
-  - Static hostlists shipped with the module. In the current tree, only active runtime lists remain.
+  - Hostlists used by the active profile.
 - `payloads/*.bin`
-  - Binary fake TLS/QUIC payloads referenced by profiles.
+  - Fake TLS/QUIC payloads referenced by profiles.
 - `bin/nfqws-*`
-  - Architecture-specific binaries. `customize.sh` renames the selected one to `bin/nfqws` at install time.
+  - Architecture-specific binaries. `customize.sh` renames the selected one to `bin/nfqws` during install.
 - `webroot/`
   - KernelSU WebUI (`index.html`, `style.css`, `kernelsu.js`).
 - `utils/`
-  - Mutable state such as `profile.current`.
+  - Mutable runtime state such as `profile.current`.
 - `META-INF/com/google/android/*`
-  - Magisk installer glue.
+  - Installer glue for the flashable module ZIP.
 - `build.sh`
-  - Packaging helper with line-ending normalization and zip creation.
+  - Packaging helper: stages the module, normalizes text line endings to LF, removes runtime artifacts, and builds the ZIP.
+- `.github/workflows/release.yml`
+  - Manual GitHub Actions workflow that runs `bash build.sh` and publishes a release from `module.prop` version.
 
 ## Runtime Flow
 
-1. `META-INF/com/google/android/update-binary` loads Magisk `util_functions.sh` and runs the module install flow.
-2. `customize.sh` unzips the module, picks `bin/nfqws-$ARCH`, renames it to `bin/nfqws`, removes the unused binaries, and sets permissions.
-3. `service.sh` waits for boot, loads the active profile, rebuilds `nzapret_out` chains in both IPv4 and IPv6 `mangle`, and starts `nfqws`.
-4. `system/bin/nzapret` is the operator-facing interface. It wraps start/stop/restart, performs manual list updates, switches profiles, exposes diagnostics, and returns JSON status for the UI.
-5. `webroot/index.html` talks to the CLI via `ksu.exec(...)`; it does not manage module internals directly.
+1. The installer runs `customize.sh`, which unpacks the module, selects `bin/nfqws-$ARCH`, renames it to `bin/nfqws`, removes the unused binaries, and fixes permissions.
+2. At boot, or via a manual CLI start, `service.sh` waits for Android boot completion, loads the active profile, recreates the `nzapret_out` chains in IPv4 and IPv6 `mangle`, and launches `nfqws`.
+3. `system/bin/nzapret` is the operator-facing interface. It wraps start/stop/restart, updates hostlists, switches profiles, exposes diagnostics, and returns JSON consumed by the WebUI.
+4. `webroot/index.html` talks to the CLI through `ksu.exec(...)`; it does not mutate module internals directly.
 
 ## Critical Invariants
 
-- Keep Android runtime scripts POSIX/Android `sh` compatible.
-  - `service.sh`, `uninstall.sh`, `action.sh`, and `system/bin/nzapret` all run under `#!/system/bin/sh`.
+- Keep runtime scripts compatible with Android `sh`.
+  - `service.sh`, `uninstall.sh`, `action.sh`, and `system/bin/nzapret` all use `#!/system/bin/sh`.
   - Avoid bash-only syntax in those files.
   - `build.sh` is the only script intentionally written for bash.
 
-- The installed module path is hardcoded in multiple places.
-  - `system/bin/nzapret` uses `MODDIR="/data/adb/modules/nzapret"`.
-  - `profiles/default.conf` hardcodes `/data/adb/modules/nzapret/...` paths.
-  - `webroot/index.html` also uses `/data/adb/modules/nzapret`.
-  - Renaming the module ID or install path is a coordinated change, not a one-file edit.
+- Treat the installed module path as a coordinated constant.
+  - `system/bin/nzapret` hardcodes `MODDIR="/data/adb/modules/nzapret"`.
+  - `profiles/default.conf` uses absolute installed paths under `/data/adb/modules/nzapret/...`.
+  - `webroot/index.html` also shells out against `/data/adb/modules/nzapret`.
+  - Changing module ID or install path requires synchronized updates across multiple files.
 
-- `system/bin/nzapret` owns all network-facing update logic.
-  - Manual list refreshes live in the CLI.
-  - `service.sh` should stay local-only at boot and manual start time.
+- Keep boot-time behavior local-only.
+  - `service.sh` should not download lists or depend on the network.
+  - List refresh belongs to `system/bin/nzapret update`.
 
 - Profiles are both parsed and passed through.
-  - `service.sh` parses only `# profile:`, `--qnum=`, `--filter-tcp=`, and `--filter-udp=` to build firewall rules and labels.
-  - All non-empty, non-comment profile lines are then passed directly to `nfqws`.
-  - Every usable profile must contain at least one `--qnum=` and at least one `--filter-tcp=` or `--filter-udp=`.
+  - `service.sh` only parses `# profile:`, `--qnum=`, `--filter-tcp=`, and `--filter-udp=` for labels and firewall rule generation.
+  - All non-empty, non-comment profile lines are still passed directly to `nfqws`.
+  - Every usable profile must contain one `--qnum=` and at least one `--filter-tcp=` or `--filter-udp=`.
 
-- WebUI depends on the CLI JSON contract.
-  - `webroot/index.html` expects `nzapret status --json` to return these fields:
+- Preserve the CLI/WebUI JSON contract.
+  - `nzapret status --json` currently returns:
     - `version`
     - `active`
     - `pid`
@@ -83,109 +84,108 @@ This is not a general app repo. Most behavior lives in shell scripts plus static
     - `domain_count`
     - `profile`
     - `profile_label`
-  - If you change that JSON schema, update the WebUI in the same change.
+  - `nzapret diagnose --json` and `nzapret events --json` are also consumed by the UI.
+  - If JSON schemas or command names change, update the WebUI in the same change.
 
-- Do not modify binaries casually.
-  - `bin/nfqws-*` and `payloads/*.bin` are opaque binary assets.
-  - Treat them as replace-only artifacts unless the task explicitly requires binary work.
+- Do not edit opaque artifacts casually.
+  - `bin/nfqws-*` and `payloads/*.bin` are binary assets.
+  - Treat them as replace-only artifacts unless the task explicitly requires binary changes.
 
-- Preserve LF line endings in text files.
-  - `build.sh` normalizes text files to LF before packaging.
-  - Do not run CRLF conversion across `bin/` or `payloads/`.
+- Preserve LF line endings for packaged text files.
+  - `build.sh` normalizes shell/config/web text files to LF in staging.
+  - Do not apply blanket CRLF conversions to the repo, especially not under `bin/` or `payloads/`.
 
-## Current Reality And Traps
+## Android-Specific Traps
 
-- The current checkout is a git repository.
-  - Use ordinary non-destructive git workflows.
-  - Avoid rewriting or reverting user work unless explicitly requested.
+- Lifecycle changes are cross-file by default.
+  - If you change start logic in `service.sh`, also inspect `system/bin/nzapret`, `uninstall.sh`, and `action.sh`.
+  - Start/stop must remain idempotent: cleanup loops intentionally remove duplicate jump rules from both `OUTPUT` and `FORWARD`.
 
-- `build.sh` stages the module from the repository root.
-  - It copies the known module files and directories into a temporary staging directory.
-  - It normalizes text line endings and strips runtime artifacts in staging, not in the working tree.
-  - If you add new top-level module entries, update `build.sh` so they are copied into staging.
+- Firewall assumptions are explicit.
+  - The custom chain name is `nzapret_out`.
+  - IPv4 and IPv6 are both configured.
+  - `service.sh` intentionally bypasses loopback and common VPN interfaces (`lo`, `tun+`, `wg+`, `tap+`).
 
-- The product is intentionally trimmed for Android-first usage.
-  - There is no interactive CLI menu anymore.
-  - `game-filter`, `auto-update`, and source-editing were removed from the CLI and WebUI.
-  - Keep new controls tightly coupled to actual Android runtime behavior.
+- Runtime state is generated inside the module directory.
+  - `utils/profile.current`, `.list_count`, `nzapret.log`, `nzapret.log.prev`, and `nzapret-events.log` are mutable artifacts.
+  - Do not hardcode assumptions that these files are committed or always present in a fresh checkout.
 
-- The Android module is intentionally hostlist-first.
-  - The shipped `profiles/default.conf` only references `list-general.txt`, `list-google.txt`, and the two default fake payloads.
-  - Keep new features aligned with the active hostlist-based Android runtime path.
+- The update path is intentionally narrow.
+  - `system/bin/nzapret update` refreshes `lists/list-general.txt` from the hardcoded upstream URL.
+  - It appends `encryptedsni.com` and `adblockplus.org` after download.
+  - Empty or failed downloads must not replace a working list.
+
+- The WebUI shells out directly.
+  - Keep command strings shell-safe.
+  - Favor stable stdout formats from CLI commands that the UI parses or displays.
 
 ## Editing Guidance
 
-### Shell Runtime Changes
+### Shell And Runtime
 
-- When changing lifecycle behavior, inspect both:
-  - `service.sh`
-  - `system/bin/nzapret`
+- Prefer simple POSIX/Android `sh` constructs over clever shell tricks.
+- Guard new external dependencies with `command -v` before use.
+- Keep log messages and failures actionable; the WebUI and CLI rely on them for debugging.
+- When changing cleanup or chain wiring, update verification logic everywhere it appears.
 
-- Keep start/stop idempotent.
-  - `service.sh` and `uninstall.sh` both rely on safe repeated cleanup of the `nzapret_out` chains.
-  - If you change rule naming or chain wiring, update cleanup and verification logic everywhere.
-
-- Respect Android command availability.
-  - Runtime scripts assume tools like `iptables`, `ip6tables`, `killall`, `curl`, `pgrep`, `tail`, and `ip` may or may not exist.
-  - Prefer explicit `command -v` checks before introducing new dependencies.
-
-### Profile Changes
+### Profiles
 
 - Keep one `nfqws` argument per line.
-- Use comments sparingly, but preserve the `# profile:` label convention for human/UI naming.
+- Preserve the `# profile:` header convention for user-facing labels.
 - Use installed absolute paths inside profiles, not repo-relative paths.
-- If you add a new profile file under `profiles/`, the CLI and WebUI will discover it automatically through `profile list`.
+- New `profiles/*.conf` files are auto-discovered by `nzapret profile list` and the WebUI profile selector.
 
-### WebUI Changes
+### WebUI
 
-- The UI shells out through `ksu.exec`, so command strings must stay shell-safe.
-- Keep CLI outputs stable when possible; the UI polls status every 5 seconds and polls `nzapret.log` every 3 seconds only while the runtime log tab is active.
-- Prefer runtime control and diagnostics over configuration-heavy settings panels.
-- Do not add UI toggles unless they map to real behavior in `service.sh` or the active profile.
+- `webroot/index.html` is the real app; `kernelsu.js` is only a thin bridge over `ksu.exec`.
+- Keep the UI aligned with actual CLI capabilities instead of adding mock controls.
+- If you add a new operator feature, prefer implementing it in the CLI first and then wiring the UI to it.
 
-### List And Source Changes
+### Packaging
 
-- Manual updates are CLI-owned.
-  - `system/bin/nzapret update ...` downloads and refreshes `list-general.txt`.
-  - `service.sh` does not download lists at boot.
-- If you change default source URLs or appended domains, update `system/bin/nzapret`.
-
-### Packaging Changes
-
-- If you add new executable scripts, update permission handling in `customize.sh`.
-- If you add new text file types that must be normalized before zipping, update `build.sh`.
-- If you fix the root-vs-`module/` packaging mismatch, document that change here as well.
+- If you add a new top-level file or directory needed in the module ZIP, update `build.sh` `MODULE_ENTRIES`.
+- If you add a new executable script, update permission handling in `customize.sh`.
+- If you add a new text file type that must be normalized to LF before packaging, update `build.sh`.
+- Keep runtime artifacts out of the packaged ZIP.
 
 ## Verification Checklist
 
 Use the lightest safe verification available for the environment.
 
-- On a desktop/non-Android host:
-  - Prefer static inspection over executing runtime scripts directly.
-  - Be careful with shell syntax, quoting, and path hardcoding.
+- Desktop or CI host:
+  - Read the affected shell paths together before changing behavior.
+  - Prefer syntax and static validation over trying to execute Android runtime scripts on a non-Android host.
+  - For packaging changes, run `bash build.sh` from a Unix-like environment with `bash`, `zip`, `sed`, and `mktemp`.
 
-- On an Android device with the module installed:
+- Android device with the module installed:
   - `sh /data/adb/modules/nzapret/system/bin/nzapret status`
   - `sh /data/adb/modules/nzapret/system/bin/nzapret status --json`
   - `sh /data/adb/modules/nzapret/system/bin/nzapret diagnose`
   - `sh /data/adb/modules/nzapret/system/bin/nzapret start`
   - `sh /data/adb/modules/nzapret/system/bin/nzapret stop`
   - `sh /data/adb/modules/nzapret/system/bin/nzapret restart`
+  - `sh /data/adb/modules/nzapret/system/bin/nzapret events --json --tail=30`
 
-- After profile or firewall changes, verify:
+- After runtime or profile changes, verify:
   - exactly one `nfqws` process is running,
-  - both IPv4 and IPv6 jumps exist for `OUTPUT` and `FORWARD`,
+  - IPv4 and IPv6 jumps exist for both `OUTPUT` and `FORWARD`,
   - `status --json` still parses,
-  - the WebUI still renders the status card and profile selector.
+  - the WebUI still renders runtime status, profile selection, diagnostics, and logs.
 
 - After list update changes, verify:
-  - `list-general.txt` still ends with `encryptedsni.com` and `adblockplus.org` after updates,
-  - cached counts still refresh,
-  - update commands do not clobber files with empty downloads.
+  - `list-general.txt` is not replaced by an empty file,
+  - appended domains are still present,
+  - cached domain counts refresh correctly,
+  - a running service restarts cleanly when required.
+
+- After packaging changes, verify:
+  - the generated ZIP contains all required module entries,
+  - executable bits are preserved for scripts and selected binaries,
+  - no runtime logs or caches are accidentally shipped.
 
 ## Safe Defaults For Agents
 
-- Prefer minimal, coordinated changes over broad rewrites.
-- Do not claim a setting is effective unless you traced it into `service.sh` and/or the active profile.
-- When touching duplicated constants or path assumptions, search the whole repo first.
-- When in doubt, preserve the CLI/WebUI contract and the current Android install path behavior.
+- Prefer small, coordinated changes over broad rewrites.
+- Search the whole repo before changing shared constants like chain names, JSON fields, or module paths.
+- Do not claim a UI control or setting works unless you traced it into the CLI and runtime scripts.
+- Preserve the current CLI/WebUI contract unless the task explicitly includes both sides of the change.
