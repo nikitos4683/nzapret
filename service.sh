@@ -255,12 +255,18 @@ ip6t_run -t mangle -I FORWARD -j "$CHAIN"
 ipt_run  -t mangle -A "$CHAIN" -m mark --mark 0x40000000/0x40000000 -j RETURN
 ip6t_run -t mangle -A "$CHAIN" -m mark --mark 0x40000000/0x40000000 -j RETURN
 
-# RETURN rules for loopback and VPN (tun+).
+# RETURN rules for loopback and standard VPN (tun+)
 # Only -o (output interface) used as chain is connected to OUTPUT and FORWARD.
 ipt_run  -t mangle -A "$CHAIN" -o lo   -j RETURN
 ip6t_run -t mangle -A "$CHAIN" -o lo   -j RETURN
 ipt_run  -t mangle -A "$CHAIN" -o tun+ -j RETURN
 ip6t_run -t mangle -A "$CHAIN" -o tun+ -j RETURN
+
+# RETURN rules for exotic / root VPN interfaces (WireGuard root, Tap)
+ipt_run  -t mangle -A "$CHAIN" -o wg+  -j RETURN
+ip6t_run -t mangle -A "$CHAIN" -o wg+  -j RETURN
+ipt_run  -t mangle -A "$CHAIN" -o tap+ -j RETURN
+ip6t_run -t mangle -A "$CHAIN" -o tap+ -j RETURN
 
 # NFQUEUE rules (same ports for IPv4 and IPv6)
 add_nfqueue_rule "$IPT"  tcp "$TCP_PORTS"

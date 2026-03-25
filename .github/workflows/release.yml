@@ -1,0 +1,38 @@
+name: Build and Release
+
+on:
+  workflow_dispatch: # Manual trigger from the GitHub Actions tab
+
+jobs:
+  release:
+    name: Build & Publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required to create a release and upload assets
+
+    steps:
+      - name: 🛎️ Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 📦 Build Module (nzapret)
+        # build.sh already contains all the logic for building the .zip archive.
+        # Ubuntu-latest runners have bash, zip, sed, and mktemp installed out-of-the-box.
+        run: bash build.sh
+
+      - name: 🔍 Get Version Info
+        id: vars
+        run: |
+          # Extract the module version directly from module.prop
+          VERSION=$(grep '^version=' module.prop | cut -d= -f2 | tr -d '\r\n')
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "ZIP_NAME=nzapret-${VERSION}.zip" >> $GITHUB_ENV
+
+      - name: 🚀 Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: "nzapret ${{ env.VERSION }}"
+          files: ${{ env.ZIP_NAME }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
