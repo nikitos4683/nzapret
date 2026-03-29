@@ -4,6 +4,8 @@ ui_print "- Preparing module files..."
 unzip -oq "$ZIPFILE" -x 'META-INF/*' -d "$MODPATH" || abort "! Failed to extract module files"
 
 mkdir -p "$MODPATH/bin"
+mkdir -p "$MODPATH/lists"
+[ -f "$MODPATH/lists/list-user.txt" ] || : > "$MODPATH/lists/list-user.txt"
 
 if [ -f "$MODPATH/bin/nfqws-$ARCH" ]; then
     mv "$MODPATH/bin/nfqws-$ARCH" "$MODPATH/bin/nfqws"

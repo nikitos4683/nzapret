@@ -55,6 +55,10 @@
                         <span class="status-item-value" id="domainCount">0</span>
                     </div>
                     <div class="status-item">
+                        <span class="status-item-label">Personal Domains</span>
+                        <span class="status-item-value" id="userDomainCount">0</span>
+                    </div>
+                    <div class="status-item">
                         <span class="status-item-label">IPv4 Rules</span>
                         <span class="status-item-value" id="rulesV4">0</span>
                     </div>
@@ -94,6 +98,37 @@
         </div>
 
         <div class="page" id="pageTools">
+            <div class="card" id="userListCard">
+                <div class="panel-head">
+                    <div>
+                        <div class="panel-title">Personal Domain List</div>
+                        <div class="panel-subtitle">Add or remove domains, then tap Save. Reload restores the saved list from the device, and saving restarts nzapret if it is already running.</div>
+                    </div>
+                    <div class="panel-actions">
+                        <button class="icon-btn" id="btnReloadUserList" type="button" onclick="reloadUserList()">Reload</button>
+                    </div>
+                </div>
+
+                <div class="user-list-meta">
+                    <span class="user-list-badge" id="userListCountBadge">0 domains</span>
+                    <span class="user-list-note" id="userListProfileNote">Linked to current profile.</span>
+                </div>
+
+                <div class="user-list-pane" id="userListPane">
+                    <div class="user-list-empty">No domains in personal list.</div>
+                </div>
+
+                <div class="user-list-quick-add">
+                    <input class="user-list-input" id="userListQuickInput" type="text" inputmode="url" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="Add one domain, then tap Add">
+                    <button class="icon-btn" id="btnAddUserListDomain" type="button" onclick="addUserListDomain()">Add</button>
+                </div>
+
+                <div class="user-list-footer">
+                    <span class="user-list-footnote" id="userListDirtyNote">No unsaved changes.</span>
+                    <button class="icon-btn primary user-list-save-btn" id="btnSaveUserList" type="button" onclick="saveUserList()">Save</button>
+                </div>
+            </div>
+
             <div class="card">
                 <div class="panel-head">
                     <div>
@@ -212,6 +247,10 @@
         let activeLogView = 'runtime';
         let currentStatus = null;
         let profilesLoaded = false;
+        let userListEntries = [];
+        let userListLoaded = false;
+        let userListRequestInFlight = false;
+        let userListSnapshot = '';
         let userScrolledUp = false;
         let diagnosticsData = null;
         let diagnosticsExpanded = false;
@@ -245,6 +284,110 @@
             return parseInt(n || 0, 10).toLocaleString('en-US');
         }
 
+        function parseUserListEntries(text) {
+            return String(text || '')
+                .replace(/\r/g, '')
+                .split('\n')
+                .map(line => line.trim())
+                .filter(line => line && !line.startsWith('#'));
+        }
+
+        function toComparableUserListText(value) {
+            return Array.isArray(value)
+                ? value.join('\n')
+                : parseUserListEntries(value).join('\n');
+        }
+
+        function setButtonDisabled(button, disabled) {
+            if (!button) return;
+            button.disabled = disabled;
+            button.classList.toggle('disabled', disabled);
+        }
+
+        function renderUserListPane() {
+            const pane = document.getElementById('userListPane');
+            if (!pane) return;
+
+            const busy = isLoading || userListRequestInFlight;
+            const savedEntries = new Set(parseUserListEntries(userListSnapshot));
+            if (!userListEntries.length) {
+                pane.innerHTML = '<div class="user-list-empty">No domains in personal list.</div>';
+                return;
+            }
+
+            pane.innerHTML = userListEntries.map(domain => `
+                <div class="user-list-item">
+                    <div class="event-dot userlist ${savedEntries.has(domain) ? 'saved' : 'pending'}"></div>
+                    <div class="event-body">
+                        <div class="user-list-domain">${esc(domain)}</div>
+                    </div>
+                    <button
+                        class="user-list-remove-btn${busy ? ' disabled' : ''}"
+                        type="button"
+                        data-remove-domain="${esc(domain)}"
+                        aria-label="Remove domain"
+                        title="Remove domain"
+                        ${busy ? 'disabled' : ''}
+                    >
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        function updateUserListEditorState() {
+            const quickInput = document.getElementById('userListQuickInput');
+            if (!quickInput) return;
+
+            const entries = userListEntries.slice();
+            const comparableText = toComparableUserListText(entries);
+            const isDirty = comparableText !== userListSnapshot;
+            const hasPendingInput = Boolean(quickInput.value.trim());
+
+            document.getElementById('userListCountBadge').textContent = `${fmt(entries.length)} domains`;
+            document.getElementById('userListDirtyNote').textContent = isDirty ? 'Unsaved changes. Press Save to apply them.' : 'No unsaved changes.';
+            document.getElementById('userListDirtyNote').classList.toggle('warning', isDirty);
+
+            const note = document.getElementById('userListProfileNote');
+            const attached = currentStatus && typeof currentStatus.user_list_attached === 'boolean'
+                ? currentStatus.user_list_attached
+                : null;
+            if (attached === false) {
+                note.textContent = 'Current profile does not reference list-user.txt yet.';
+            } else if (attached === true) {
+                note.textContent = 'Linked to current profile.';
+            } else {
+                note.textContent = 'Profile status unavailable.';
+            }
+            note.classList.toggle('warning', attached === false);
+
+            const busy = isLoading || userListRequestInFlight;
+            renderUserListPane();
+            setButtonDisabled(document.getElementById('btnSaveUserList'), busy || !isDirty);
+            setButtonDisabled(document.getElementById('btnReloadUserList'), busy);
+            setButtonDisabled(document.getElementById('btnAddUserListDomain'), busy || !hasPendingInput);
+        }
+
+        function setupUserListEditor() {
+            const quickInput = document.getElementById('userListQuickInput');
+            const pane = document.getElementById('userListPane');
+            if (!quickInput || !pane || quickInput.dataset.bound === '1') return;
+            quickInput.dataset.bound = '1';
+            quickInput.addEventListener('input', updateUserListEditorState);
+            quickInput.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    addUserListDomain();
+                }
+            });
+            pane.addEventListener('click', (event) => {
+                const button = event.target.closest('[data-remove-domain]');
+                if (!button) return;
+                removeUserListDomain(button.getAttribute('data-remove-domain') || '');
+            });
+            updateUserListEditorState();
+        }
+
         function updatePageButtons() {
             document.getElementById('btnPageRuntime').classList.toggle('active', activePage === 'runtime');
             document.getElementById('btnPageTools').classList.toggle('active', activePage === 'tools');
@@ -264,7 +407,9 @@
             activePage = page;
             renderPages();
 
-            if (activePage === 'logs') {
+            if (activePage === 'tools') {
+                await loadUserList();
+            } else if (activePage === 'logs') {
                 if (activeLogView === 'runtime') {
                     if (!runtimeLogText) {
                         runtimeLogText = 'Loading runtime log...';
@@ -615,11 +760,15 @@
 
         // --- Action buttons ---
         function updateActionButtons(isOn) {
-            if (isLoading) return;
+            if (isLoading) {
+                updateUserListEditorState();
+                return;
+            }
             document.getElementById('btnStart').classList.toggle('disabled', isOn);
             document.getElementById('btnStop').classList.toggle('disabled', !isOn);
             document.getElementById('btnRestart').classList.toggle('disabled', !isOn);
             document.getElementById('btnUpdate').classList.remove('disabled');
+            updateUserListEditorState();
         }
 
         function applyUnavailableState(reason = 'STATUS ERROR') {
@@ -629,6 +778,7 @@
             document.getElementById('rulesV4').textContent = '?';
             document.getElementById('rulesV6').textContent = '?';
             document.getElementById('domainCount').textContent = '?';
+            document.getElementById('userDomainCount').textContent = '?';
 
             const card = document.getElementById('statusCard');
             const dot = document.getElementById('statusDot');
@@ -643,6 +793,7 @@
                 document.querySelectorAll('button').forEach((button) => button.classList.remove('disabled'));
                 updateActionButtons(false);
             }
+            updateUserListEditorState();
         }
 
         // --- CLI execution ---
@@ -761,7 +912,9 @@
                 document.getElementById('rulesV4').textContent = status.rules_v4 ?? 0;
                 document.getElementById('rulesV6').textContent = status.rules_v6 ?? 0;
                 document.getElementById('domainCount').textContent = fmt(status.domain_count ?? 0);
+                document.getElementById('userDomainCount').textContent = fmt(status.user_domain_count ?? 0);
                 updateProfileSlider(status.profile);
+                updateUserListEditorState();
 
                 const card = document.getElementById('statusCard');
                 const dot = document.getElementById('statusDot');
@@ -874,6 +1027,107 @@
             }
         }
 
+        // --- Personal list editor ---
+        async function loadUserList(force = false) {
+            if ((!force && userListLoaded) || userListRequestInFlight) {
+                updateUserListEditorState();
+                return true;
+            }
+
+            userListRequestInFlight = true;
+            updateUserListEditorState();
+
+            try {
+                const res = await exec(`${CLI} list-user show`);
+                if (res.errno !== 0) {
+                    const details = [res.stdout || '', res.stderr || ''].join('\n').trim();
+                    throw new Error(details || 'list-user show failed');
+                }
+                const raw = (res.stdout || '').replace(/\r/g, '');
+                const quickInput = document.getElementById('userListQuickInput');
+                userListEntries = parseUserListEntries(raw);
+                if (quickInput) {
+                    quickInput.value = '';
+                }
+                userListSnapshot = toComparableUserListText(userListEntries);
+                userListLoaded = true;
+                return true;
+            } catch (error) {
+                console.error('Failed to load user list:', error);
+                showToast('Failed to load personal list');
+                return false;
+            } finally {
+                userListRequestInFlight = false;
+                updateUserListEditorState();
+            }
+        }
+
+        async function reloadUserList() {
+            if (isLoading || userListRequestInFlight) return;
+            const loaded = await loadUserList(true);
+            if (loaded) {
+                showToast('Personal list reloaded');
+            }
+        }
+
+        function addUserListDomain() {
+            if (isLoading || userListRequestInFlight) return;
+
+            const quickInput = document.getElementById('userListQuickInput');
+            if (!quickInput) return;
+
+            const domain = quickInput.value.trim();
+            if (!domain) return;
+            if (domain.startsWith('#')) {
+                showToast('Comments are not added here');
+                return;
+            }
+
+            if (userListEntries.includes(domain)) {
+                showToast('Domain already in list');
+                quickInput.select();
+                updateUserListEditorState();
+                return;
+            }
+
+            userListEntries = [...userListEntries, domain];
+            quickInput.value = '';
+            updateUserListEditorState();
+            quickInput.focus();
+        }
+
+        function removeUserListDomain(domain) {
+            if (isLoading || userListRequestInFlight || !domain) return;
+
+            const index = userListEntries.indexOf(domain);
+            if (index === -1) return;
+
+            userListEntries = [
+                ...userListEntries.slice(0, index),
+                ...userListEntries.slice(index + 1)
+            ];
+            updateUserListEditorState();
+        }
+
+        async function saveUserList() {
+            if (isLoading || userListRequestInFlight) return;
+
+            const entries = userListEntries.slice();
+            const command = entries.length
+                ? `list-user replace ${entries.map(shellQuote).join(' ')}`
+                : 'list-user clear';
+
+            const result = await runCli(command, {
+                loadingText: entries.length ? 'Saving personal domains...' : 'Clearing personal domains...',
+                successText: entries.length ? 'Personal list saved' : 'Personal list cleared',
+                outputTitle: 'list-user'
+            });
+
+            if (result.ok) {
+                await loadUserList(true);
+            }
+        }
+
         // --- Event log clearing ---
         async function clearEventsLog() {
             if (activeLogView !== 'events' || isLoading) return;
@@ -913,6 +1167,9 @@
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) {
                 refreshStatus();
+                if (activePage === 'tools') {
+                    loadUserList(true);
+                }
                 if (activePage === 'logs') {
                     if (activeLogView === 'runtime') {
                         refreshLog();
@@ -930,6 +1187,9 @@
         window.doAction = doAction;
         window.setPage = setPage;
         window.setProfile = setProfile;
+        window.reloadUserList = reloadUserList;
+        window.addUserListDomain = addUserListDomain;
+        window.saveUserList = saveUserList;
         window.setLogView = setLogView;
         window.clearEventsLog = clearEventsLog;
         window.runDiagnose = runDiagnose;
@@ -939,6 +1199,7 @@
 
         // --- Init ---
         setupScrollTracking();
+        setupUserListEditor();
         startStatusPolling();
         renderPages();
         renderLogView();

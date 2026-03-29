@@ -533,6 +533,12 @@ body.ui-busy .icon-btn {
     line-height: 1.5;
 }
 
+.panel-subtitle code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-primary);
+}
+
 .panel-actions {
     display: flex;
     align-items: center;
@@ -723,6 +729,201 @@ body.ui-busy .icon-btn {
     color: var(--text-secondary);
 }
 
+/* --- Personal list editor --- */
+.user-list-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.user-list-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+}
+
+.user-list-note,
+.user-list-footnote {
+    font-size: 11px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.user-list-note.warning,
+.user-list-footnote.warning {
+    color: var(--orange);
+}
+
+.user-list-pane {
+    width: 100%;
+    min-height: 180px;
+    max-height: 360px;
+    padding: 8px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: var(--bg-code);
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+}
+
+.user-list-pane::-webkit-scrollbar {
+    width: 4px;
+}
+
+.user-list-pane::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.user-list-pane::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+}
+
+.user-list-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 140px;
+    padding: 24px 16px;
+    text-align: center;
+    color: var(--text-tertiary);
+    font-size: 12px;
+    line-height: 1.6;
+    gap: 8px;
+}
+
+.user-list-empty::before {
+    content: '';
+    display: block;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: var(--bg-input);
+    border: 1px dashed var(--border);
+}
+
+.user-list-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    transition: background 0.15s ease;
+}
+
+.user-list-item + .user-list-item {
+    border-top: 1px solid var(--border);
+}
+
+.user-list-domain {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-primary);
+    word-break: break-word;
+}
+
+.user-list-remove-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    min-width: 30px;
+    height: 30px;
+    min-height: 30px;
+    margin-left: auto;
+    align-self: center;
+    padding: 0;
+    border-radius: 8px;
+    color: var(--text-tertiary);
+    background: transparent;
+    border: 1px solid transparent;
+    -webkit-tap-highlight-color: transparent;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.user-list-remove-btn svg {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+}
+
+.user-list-remove-btn:not(.disabled):active {
+    transform: scale(0.92);
+    color: var(--red);
+    background: var(--red-bg);
+}
+
+.user-list-quick-add {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    margin-top: 14px;
+    align-items: stretch;
+}
+
+.user-list-input {
+    width: 100%;
+    min-width: 0;
+    min-height: 46px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.user-list-input::placeholder {
+    color: var(--text-tertiary);
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+}
+
+.user-list-input:focus {
+    border-color: rgba(0, 229, 255, 0.28);
+    box-shadow: 0 0 0 2px rgba(0, 229, 255, 0.08);
+    background: var(--bg-card-hover);
+}
+
+.user-list-quick-add .icon-btn {
+    min-height: 46px;
+    padding: 10px 16px;
+    border-radius: 12px;
+    font-size: 12px;
+}
+
+.user-list-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 14px;
+}
+
+.user-list-save-btn {
+    min-width: 96px;
+    min-height: 42px;
+    border-radius: 12px;
+    font-size: 12px;
+}
+
 .icon-btn {
     min-height: 34px;
     padding: 7px 11px;
@@ -737,6 +938,18 @@ body.ui-busy .icon-btn {
     background: var(--accent-soft);
     border-color: rgba(0, 229, 255, 0.25);
     color: var(--accent);
+}
+
+.icon-btn.primary {
+    background: var(--accent-soft);
+    border-color: rgba(0, 229, 255, 0.25);
+    color: var(--accent);
+}
+
+.icon-btn.disabled,
+.diag-inline-btn.disabled {
+    opacity: 0.45;
+    pointer-events: none;
 }
 
 /* --- Log segment control --- */
@@ -906,6 +1119,8 @@ body.ui-busy .icon-btn {
 .event-dot.start, .event-dot.nfqws { background: var(--green); box-shadow: 0 0 6px var(--green-glow); }
 .event-dot.stop, .event-dot.error  { background: var(--red); box-shadow: 0 0 6px var(--red-glow); }
 .event-dot.update, .event-dot.profile { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
+.event-dot.userlist.saved { background: var(--green); box-shadow: 0 0 6px var(--green-glow); }
+.event-dot.userlist.pending { background: var(--orange); box-shadow: 0 0 6px rgba(255, 171, 64, 0.25); }
 .event-dot.iptables, .event-dot.info  { background: var(--text-tertiary); }
 
 .event-body {
@@ -1288,6 +1503,15 @@ body.ui-busy .icon-btn {
     .diag-summary-actions {
         justify-content: flex-start;
         flex-wrap: wrap;
+    }
+
+    .user-list-footer {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .user-list-quick-add {
+        grid-template-columns: 1fr;
     }
 
     .event-clear-btn {

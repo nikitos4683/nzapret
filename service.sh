@@ -11,6 +11,7 @@ LOGFILE="$MODDIR/nzapret.log"
 EVENTLOG="$MODDIR/nzapret-events.log"
 UTILS="$MODDIR/utils"
 LISTS="$MODDIR/lists"
+USER_LIST_FILE="$LISTS/list-user.txt"
 PAYLOADS="$MODDIR/payloads"
 BIN="$MODDIR/bin/nfqws"
 ACTIVE_PROFILE_FILE="$UTILS/profile.current"
@@ -39,6 +40,10 @@ require_cmd() {
 
 require_file() {
     [ -f "$1" ] || fail "missing file: $1"
+}
+
+ensure_user_list_file() {
+    [ -f "$USER_LIST_FILE" ] || : > "$USER_LIST_FILE" || fail "cannot create $USER_LIST_FILE"
 }
 
 # Iptables helpers
@@ -224,6 +229,7 @@ require_cmd iptables
 require_cmd ip6tables
 require_cmd killall
 mkdir -p "$UTILS" "$PROFILE_DIR" "$LISTS" || fail "mkdir -p failed"
+ensure_user_list_file
 
 # Prepare binaries
 require_file "$BIN"

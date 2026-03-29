@@ -102,6 +102,7 @@ fi
 echo "[*] Removing runtime artifacts from staging tree..."
 rm -f \
     "$STAGE_DIR/.list_count" \
+    "$STAGE_DIR/lists/list-user.txt" \
     "$STAGE_DIR/nzapret.log" \
     "$STAGE_DIR/nzapret.log.prev" \
     "$STAGE_DIR/nzapret-events.log"
@@ -124,6 +125,7 @@ cd "$STAGE_DIR"
 zip -r9 "$ZIP_PATH" . \
     -x "*.git*" \
     -x ".list_count" \
+    -x "lists/list-user.txt" \
     -x "nzapret.log" \
     -x "nzapret.log.prev" \
     -x "nzapret-events.log" \

@@ -6,6 +6,7 @@
 
 MODDIR="/data/adb/modules/nzapret"
 LISTS="$MODDIR/lists"
+USER_LIST_FILE="$LISTS/list-user.txt"
 PAYLOADS="$MODDIR/payloads"
 BIN="$MODDIR/bin/nfqws"
 CHAIN="nzapret_out"
@@ -23,6 +24,12 @@ ALWAYS_INCLUDE_DOMAINS="encryptedsni.com adblockplus.org"
 # Helpers
 ensure_utils_dir() {
     mkdir -p "$UTILS" >/dev/null 2>&1
+}
+
+ensure_runtime_layout() {
+    ensure_utils_dir
+    mkdir -p "$LISTS" >/dev/null 2>&1
+    [ -f "$USER_LIST_FILE" ] || : > "$USER_LIST_FILE" 2>/dev/null
 }
 
 log_event() {
@@ -72,6 +79,17 @@ get_active_profile() {
 
 get_profile_config_file() {
     echo "$PROFILE_DIR/$1.conf"
+}
+
+profile_uses_user_list() {
+    _pname="$1"
+    _pconfig=$(get_profile_config_file "$_pname")
+    [ -f "$_pconfig" ] || return 1
+    grep -F -q -e "$USER_LIST_FILE" "$_pconfig" 2>/dev/null
+}
+
+active_profile_uses_user_list() {
+    profile_uses_user_list "$(get_active_profile)"
 }
 
 profile_exists() {
@@ -140,6 +158,148 @@ refresh_counts() {
     get_list_count "$MODDIR/.list_count" "$LISTS/list-general.txt" 1 >/dev/null
 }
 
+get_plain_list_count() {
+    _list_file="$1"
+    if [ -f "$_list_file" ]; then
+        sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$_list_file" | wc -l | tr -d '[:space:]'
+    else
+        echo 0
+    fi
+}
+
+get_user_list_count() {
+    get_plain_list_count "$USER_LIST_FILE"
+}
+
+trim_list_entry() {
+    printf '%s' "$1" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
+make_temp_file() {
+    _tmp=$(mktemp 2>/dev/null)
+    if [ -z "$_tmp" ]; then
+        _tmp="/data/local/tmp/nzapret.$$.tmp"
+        : > "$_tmp" 2>/dev/null || return 1
+    fi
+    echo "$_tmp"
+}
+
+write_user_list_entries() {
+    _tmp=$(make_temp_file) || return 1
+    : > "$_tmp" || {
+        rm -f "$_tmp"
+        return 1
+    }
+
+    for _entry in "$@"; do
+        _clean=$(trim_list_entry "$_entry")
+        case "$_clean" in
+            ""|\#*) continue ;;
+        esac
+        if grep -F -x -q -e "$_clean" "$_tmp" 2>/dev/null; then
+            continue
+        fi
+        printf '%s\n' "$_clean" >> "$_tmp" || {
+            rm -f "$_tmp"
+            return 1
+        }
+    done
+
+    mv -f "$_tmp" "$USER_LIST_FILE" || {
+        rm -f "$_tmp"
+        return 1
+    }
+}
+
+append_user_list_entries() {
+    _tmp=$(make_temp_file) || return 1
+    : > "$_tmp" || {
+        rm -f "$_tmp"
+        return 1
+    }
+
+    if [ -f "$USER_LIST_FILE" ]; then
+        while IFS= read -r _line || [ -n "$_line" ]; do
+            printf '%s\n' "$_line" >> "$_tmp" || {
+                rm -f "$_tmp"
+                return 1
+            }
+        done < "$USER_LIST_FILE"
+    fi
+
+    _added=0
+    for _entry in "$@"; do
+        _clean=$(trim_list_entry "$_entry")
+        case "$_clean" in
+            ""|\#*) continue ;;
+        esac
+        if grep -F -x -q -e "$_clean" "$_tmp" 2>/dev/null; then
+            continue
+        fi
+        printf '%s\n' "$_clean" >> "$_tmp" || {
+            rm -f "$_tmp"
+            return 1
+        }
+        _added=$((_added + 1))
+    done
+
+    mv -f "$_tmp" "$USER_LIST_FILE" || {
+        rm -f "$_tmp"
+        return 1
+    }
+
+    echo "$_added"
+}
+
+remove_user_list_entries() {
+    _tmp=$(make_temp_file) || return 1
+    : > "$_tmp" || {
+        rm -f "$_tmp"
+        return 1
+    }
+
+    while IFS= read -r _line || [ -n "$_line" ]; do
+        _keep=1
+        for _entry in "$@"; do
+            _clean=$(trim_list_entry "$_entry")
+            case "$_clean" in
+                ""|\#*) continue ;;
+            esac
+            if [ "$_line" = "$_clean" ]; then
+                _keep=0
+                break
+            fi
+        done
+        [ "$_keep" = "1" ] && printf '%s\n' "$_line" >> "$_tmp"
+    done < "$USER_LIST_FILE"
+
+    mv -f "$_tmp" "$USER_LIST_FILE" || {
+        rm -f "$_tmp"
+        return 1
+    }
+}
+
+print_user_list_status() {
+    _user_count=$(get_user_list_count)
+    if active_profile_uses_user_list; then
+        echo "list-user.txt: $_user_count domains (active in current profile)"
+    else
+        echo "list-user.txt: $_user_count domains (current profile does not reference it)"
+    fi
+    echo ""
+    echo "Domains:"
+    if [ "$_user_count" -gt 0 ]; then
+        sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$USER_LIST_FILE"
+    else
+        echo "(empty)"
+    fi
+}
+
+print_user_list_contents() {
+    [ -f "$USER_LIST_FILE" ] || return 0
+    cat "$USER_LIST_FILE"
+}
+
 # Status printers
 
 print_profile_status() {
@@ -159,6 +319,7 @@ print_status_human() {
     _rules=$(get_rule_count iptables)
     _rules6=$(get_rule_count ip6tables)
     _lc=$(get_list_count "$MODDIR/.list_count" "$LISTS/list-general.txt")
+    _user_lc=$(get_user_list_count)
 
     [ -n "$_ver" ] && echo "Module version: $_ver"
 
@@ -178,6 +339,13 @@ print_status_human() {
     else
         echo "list-general.txt: MISSING"
     fi
+
+    echo "list-user.txt: $_user_lc domains"
+    if active_profile_uses_user_list; then
+        echo "list-user binding: active in current profile"
+    else
+        echo "list-user binding: inactive (profile missing --hostlist=$USER_LIST_FILE)"
+    fi
 }
 
 print_status_json() {
@@ -193,11 +361,17 @@ print_status_json() {
     _rules=$(get_rule_count iptables)
     _rules6=$(get_rule_count ip6tables)
     _lc=$(get_list_count "$MODDIR/.list_count" "$LISTS/list-general.txt")
+    _user_lc=$(get_user_list_count)
     _prof_name=$(get_active_profile)
     _prof_label=$(get_profile_label "$_prof_name")
+    if active_profile_uses_user_list; then
+        _user_attached=true
+    else
+        _user_attached=false
+    fi
 
-    printf '{"version":"%s","active":%s,"pid":"%s","pid_count":%s,"rules_v4":%s,"rules_v6":%s,"domain_count":%s,"profile":"%s","profile_label":"%s"}\n' \
-        "$(json_escape "$_ver")" "$_active" "$(json_escape "$_pid")" "$_pid_count" "$_rules" "$_rules6" "$_lc" "$(json_escape "$_prof_name")" "$(json_escape "$_prof_label")"
+    printf '{"version":"%s","active":%s,"pid":"%s","pid_count":%s,"rules_v4":%s,"rules_v6":%s,"domain_count":%s,"user_domain_count":%s,"user_list_attached":%s,"profile":"%s","profile_label":"%s"}\n' \
+        "$(json_escape "$_ver")" "$_active" "$(json_escape "$_pid")" "$_pid_count" "$_rules" "$_rules6" "$_lc" "$_user_lc" "$_user_attached" "$(json_escape "$_prof_name")" "$(json_escape "$_prof_label")"
 }
 
 get_rule_count() {
@@ -252,10 +426,11 @@ update_list_file() {
 restart_if_running() {
     if is_running; then
         echo "[*] Restarting nfqws to apply changes..."
-        exec "$0" restart
+        "$0" restart
+        return $?
     fi
     echo "[*] nzapret is not running. Changes will apply on next start."
-    exit 0
+    return 0
 }
 
 # Diagnostics
@@ -278,6 +453,7 @@ run_diagnose() {
         "$BIN" \
         "$_active_profile_config" \
         "$LISTS/list-general.txt" \
+        "$USER_LIST_FILE" \
         "$LISTS/list-google.txt" \
         "$PAYLOADS/quic_initial_www_google_com.bin" \
         "$PAYLOADS/tls_clienthello_www_google_com.bin"; do
@@ -293,6 +469,12 @@ run_diagnose() {
         echo "[OK] nfqws running (PID: $_pid)"
     else
         echo "[!!] nfqws is not running"
+    fi
+
+    if active_profile_uses_user_list; then
+        echo "[OK] active profile includes list-user.txt"
+    else
+        echo "[!!] active profile does not reference list-user.txt"
     fi
 
     # Check all jump rules (OUTPUT + FORWARD)
@@ -355,6 +537,7 @@ run_diagnose_json() {
         "$BIN" \
         "$_active_profile_config" \
         "$LISTS/list-general.txt" \
+        "$USER_LIST_FILE" \
         "$LISTS/list-google.txt" \
         "$PAYLOADS/quic_initial_www_google_com.bin" \
         "$PAYLOADS/tls_clienthello_www_google_com.bin"; do
@@ -375,6 +558,15 @@ run_diagnose_json() {
         _ok=$((_ok + 1))
     else
         _checks="${_checks}${_sep}{\"name\":\"nfqws process\",\"status\":\"fail\",\"detail\":\"not running\"}"
+        _fail=$((_fail + 1))
+    fi
+    _sep=","
+
+    if active_profile_uses_user_list; then
+        _checks="${_checks}${_sep}{\"name\":\"list-user binding\",\"status\":\"ok\",\"detail\":\"active profile includes list-user.txt\"}"
+        _ok=$((_ok + 1))
+    else
+        _checks="${_checks}${_sep}{\"name\":\"list-user binding\",\"status\":\"fail\",\"detail\":\"active profile does not reference list-user.txt\"}"
         _fail=$((_fail + 1))
     fi
     _sep=","
@@ -456,7 +648,7 @@ print_events_json() {
 }
 
 # Entry point
-ensure_utils_dir
+ensure_runtime_layout
 
 [ $# -eq 0 ] && {
     set -- help
@@ -582,6 +774,90 @@ case "$1" in
         esac
         ;;
 
+    "list-user")
+        case "$2" in
+            ""|"status")
+                print_user_list_status
+                ;;
+            "show")
+                print_user_list_contents
+                ;;
+            "add")
+                shift 2
+                [ "$#" -gt 0 ] || {
+                    echo "Usage: nzapret list-user add <domain> [domain...]"
+                    exit 1
+                }
+                _added=$(append_user_list_entries "$@") || {
+                    echo "[-] Failed to update list-user.txt"
+                    exit 1
+                }
+                if [ "$_added" -eq 0 ]; then
+                    echo "[*] list-user.txt already contains those domains"
+                    exit 0
+                fi
+                _user_count=$(get_user_list_count)
+                log_event USERLIST "added $_added domains ($_user_count total)"
+                echo "[+] Added $_added domains to list-user.txt ($_user_count total)"
+                restart_if_running || exit 1
+                ;;
+            "remove")
+                shift 2
+                [ "$#" -gt 0 ] || {
+                    echo "Usage: nzapret list-user remove <domain> [domain...]"
+                    exit 1
+                }
+                _before=$(get_user_list_count)
+                remove_user_list_entries "$@" || {
+                    echo "[-] Failed to update list-user.txt"
+                    exit 1
+                }
+                _after=$(get_user_list_count)
+                _removed=$((_before - _after))
+                if [ "$_removed" -le 0 ]; then
+                    echo "[*] No matching domains found in list-user.txt"
+                    exit 0
+                fi
+                log_event USERLIST "removed $_removed domains ($_after total)"
+                echo "[+] Removed $_removed domains from list-user.txt ($_after total)"
+                restart_if_running || exit 1
+                ;;
+            "replace")
+                shift 2
+                [ "$#" -gt 0 ] || {
+                    echo "Usage: nzapret list-user replace <domain> [domain...]"
+                    exit 1
+                }
+                write_user_list_entries "$@" || {
+                    echo "[-] Failed to rewrite list-user.txt"
+                    exit 1
+                }
+                _user_count=$(get_user_list_count)
+                log_event USERLIST "replaced list-user.txt ($_user_count total)"
+                echo "[+] Saved list-user.txt ($_user_count domains)"
+                restart_if_running || exit 1
+                ;;
+            "clear")
+                _before=$(get_user_list_count)
+                : > "$USER_LIST_FILE" || {
+                    echo "[-] Failed to clear list-user.txt"
+                    exit 1
+                }
+                if [ "$_before" -gt 0 ]; then
+                    echo "[+] list-user.txt cleared"
+                    log_event USERLIST "cleared list-user.txt"
+                    restart_if_running || exit 1
+                else
+                    echo "[*] list-user.txt is already empty"
+                fi
+                ;;
+            *)
+                echo "Usage: nzapret list-user [status|show|add <domain...>|remove <domain...>|replace <domain...>|clear]"
+                exit 1
+                ;;
+        esac
+        ;;
+
     "diagnose")
         case "$2" in
             "--json") run_diagnose_json ;;
@@ -630,10 +906,12 @@ case "$1" in
         echo "  events clear                - clear the whole event log file"
         echo "  events --json [--tail=N]    - event history as JSON"
         echo "  profile <subcommand>        - show, list or switch nfqws profiles"
+        echo "  list-user <subcommand>      - manage the personal domain hostlist"
         echo "  diagnose                    - run Android-side diagnostics"
         echo "  diagnose --json             - diagnostics as JSON for WebUI"
         echo "  help                        - show this help message"
         echo ""
         echo "Profile commands: status, list, set <name>"
+        echo "User list commands: status, show, add, remove, replace, clear"
         ;;
 esac
