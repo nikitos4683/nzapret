@@ -18,9 +18,6 @@ PROFILE_DIR="$MODDIR/profiles"
 DEFAULT_PROFILE="default"
 DEFAULT_LIST_SOURCE="https://raw.githubusercontent.com/bol-van/rulist/refs/heads/main/reestr_hostname.txt"
 
-# Domains always appended after a manual list refresh.
-ALWAYS_INCLUDE_DOMAINS="encryptedsni.com adblockplus.org"
-
 # Helpers
 ensure_utils_dir() {
     mkdir -p "$UTILS" >/dev/null 2>&1
@@ -417,7 +414,6 @@ download_to_tmp() {
 
 update_list_file() {
     if download_to_tmp "$DEFAULT_LIST_SOURCE" "$LISTS/list-general.txt" "list-general.txt"; then
-        printf '%s\n' $ALWAYS_INCLUDE_DOMAINS >> "$LISTS/list-general.txt"
         return 0
     fi
     return 1
