@@ -8,6 +8,7 @@
 ![Root](https://img.shields.io/badge/Root-Magisk%20%7C%20KernelSU-1f6feb?style=for-the-badge)
 ![Engine](https://img.shields.io/badge/Engine-nfqws-f59e0b?style=for-the-badge)
 ![UI](https://img.shields.io/badge/UI-KernelSU%20WebUI-8b5cf6?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-v1.1.0-blue?style=for-the-badge)
 
 </div>
 
@@ -51,6 +52,7 @@
 Модуль содержит собственный Web-интерфейс (`webroot/`), который интегрируется в KernelSU.
 - Отображает подробный статус устройства (версия, PID, количество правил и доменов).
 - Позволяет управлять модулем (Start / Stop / Restart / Выбор профиля).
+- **Встроенный визуальный редактор** для управления персональным списком доменов (`list-user`).
 - Содержит вкладки с системными логами службы и логами диагностики в реальном времени.
 - Имеет встроенный режим диагностики проблем, помогающий выявить причины неполадок на конкретном устройстве.
 - Вся связь между UI и модулем работает через вызовы к CLI (`nzapret status --json`).
@@ -101,6 +103,8 @@ nzapret list-user status    # Статус персонального списк
 nzapret list-user show      # Показать текущее содержимое
 nzapret list-user add example.com youtube.com
 nzapret list-user remove example.com
+nzapret list-user replace example.com github.com # Перезаписать список
+nzapret list-user clear     # Полностью очистить список
 ```
 
 Если вы используете собственный `profiles/*.conf`, добавьте в нужные секции строку:
