@@ -26,15 +26,28 @@ jobs:
         run: |
           # Extract the module version directly from module.prop
           VERSION=$(grep '^version=' module.prop | cut -d= -f2 | tr -d '\r\n')
+          VERSION_CODE=$(grep '^versionCode=' module.prop | cut -d= -f2 | tr -d '\r\n')
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "ZIP_NAME=nzapret-${VERSION}.zip" >> $GITHUB_ENV
+          
+          # Generate update.json for Magisk/KernelSU OTA
+          cat <<EOF > update.json
+          {
+            "version": "$VERSION",
+            "versionCode": $VERSION_CODE,
+            "zipUrl": "https://github.com/nikitos4683/nzapret/releases/download/$VERSION/nzapret-${VERSION}.zip",
+            "changelog": "https://github.com/nikitos4683/nzapret/releases/tag/$VERSION"
+          }
+          EOF
 
       - name: 🚀 Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.VERSION }}
           name: "nzapret ${{ env.VERSION }}"
-          files: ${{ env.ZIP_NAME }}
+          files: |
+            ${{ env.ZIP_NAME }}
+            update.json
           generate_release_notes: true
           draft: false
           prerelease: false
