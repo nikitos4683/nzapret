@@ -1,20 +1,28 @@
 #!/system/bin/sh
 # nzapret — CLI management utility
 # Installed to /system/bin/ via Magisk overlay.
-# Provides commands for controlling nfqws service, updating lists,
+# Provides commands for controlling nfqws2 service, updating lists,
 # managing profiles and diagnostics.
 
 MODDIR="/data/adb/modules/nzapret"
 LISTS="$MODDIR/lists"
 USER_LIST_FILE="$LISTS/list-user.txt"
+GENERAL_LIST_FILE="$LISTS/list-general.txt"
+GOOGLE_LIST_FILE="$LISTS/list-google.txt"
 PAYLOADS="$MODDIR/payloads"
-BIN="$MODDIR/bin/nfqws"
+LUA_DIR="$MODDIR/lua"
+PAYLOAD_QUIC_FILE="$PAYLOADS/quic_initial_www_google_com.bin"
+PAYLOAD_TLS_FILE="$PAYLOADS/tls_clienthello_www_google_com.bin"
+BIN="$MODDIR/bin/nfqws2"
 CHAIN="nzapret_out"
 LOGFILE="$MODDIR/nzapret.log"
 EVENTLOG="$MODDIR/nzapret-events.log"
 PROFILE_DIR="$MODDIR/profiles"
 ACTIVE_PROFILE_FILE="$PROFILE_DIR/profile.current"
 DEFAULT_PROFILE="default"
+PROCESS_NAME="nfqws2"
+LIST_COUNT_CACHE="$MODDIR/.list_count"
+DIAGNOSE_COMMANDS="iptables ip6tables pgrep tail curl ip"
 DEFAULT_LIST_SOURCE="https://raw.githubusercontent.com/bol-van/rulist/refs/heads/main/reestr_hostname.txt"
 
 # Helpers
@@ -30,20 +38,77 @@ log_event() {
     printf '%s %-8s %s\n' "$_ets" "$_etype" "$*" >> "$EVENTLOG"
 }
 
+has_cmd() {
+    command -v "$1" >/dev/null 2>&1
+}
+
 require_cmd() {
-    command -v "$1" >/dev/null 2>&1 || {
+    has_cmd "$1" || {
         echo "[-] Missing command: $1"
         exit 1
     }
 }
 
+json_escape() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+print_human_check() {
+    _status="$1"
+    _detail="$2"
+    case "$_status" in
+        ok)   echo "[OK] $_detail" ;;
+        fail) echo "[!!] $_detail" ;;
+    esac
+}
+
+append_json_check() {
+    _name="$1"
+    _status="$2"
+    _detail="$3"
+    _checks="${_checks}${_sep}{\"name\":\"$(json_escape "$_name")\",\"status\":\"$_status\",\"detail\":\"$(json_escape "$_detail")\"}"
+    _sep=","
+    if [ "$_status" = "ok" ]; then
+        _ok=$((_ok + 1))
+    else
+        _fail=$((_fail + 1))
+    fi
+}
+
 # Process management
+is_live_pid() {
+    _pid="$1"
+    [ -n "$_pid" ] || return 1
+    [ -d "/proc/$_pid" ] || return 1
+    _state=$(awk '/^State:/ { print $2; exit }' "/proc/$_pid/status" 2>/dev/null)
+    case "$_state" in
+        Z) return 1 ;;
+    esac
+    return 0
+}
+
+list_live_pids() {
+    for _pid in $(pgrep -x "$PROCESS_NAME" 2>/dev/null); do
+        if is_live_pid "$_pid"; then
+            echo "$_pid"
+        fi
+    done
+}
+
 get_first_pid() {
-    pgrep -x "nfqws" 2>/dev/null | head -n 1
+    for _pid in $(list_live_pids); do
+        echo "$_pid"
+        return 0
+    done
+    return 1
 }
 
 get_pid_count() {
-    pgrep -x "nfqws" 2>/dev/null | wc -l | tr -d '[:space:]'
+    _count=0
+    for _pid in $(list_live_pids); do
+        _count=$((_count + 1))
+    done
+    echo "$_count"
 }
 
 is_running() {
@@ -71,6 +136,10 @@ get_active_profile() {
 
 get_profile_config_file() {
     echo "$PROFILE_DIR/$1.conf"
+}
+
+get_active_profile_config() {
+    get_profile_config_file "$(get_active_profile)"
 }
 
 profile_uses_user_list() {
@@ -147,7 +216,7 @@ get_list_count() {
 }
 
 refresh_counts() {
-    get_list_count "$MODDIR/.list_count" "$LISTS/list-general.txt" 1 >/dev/null
+    get_list_count "$LIST_COUNT_CACHE" "$GENERAL_LIST_FILE" 1 >/dev/null
 }
 
 get_plain_list_count() {
@@ -299,37 +368,39 @@ print_profile_status() {
     echo "Active profile: $_pname ($(get_profile_label "$_pname"))"
 }
 
-# JSON helper
-json_escape() {
-    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
-}
-
 print_status_human() {
     _ver=$(get_version)
     _pid=$(get_first_pid)
     _pid_count=$(get_pid_count)
     _rules=$(get_rule_count iptables)
     _rules6=$(get_rule_count ip6tables)
-    _lc=$(get_list_count "$MODDIR/.list_count" "$LISTS/list-general.txt")
+    _lc=$(get_list_count "$LIST_COUNT_CACHE" "$GENERAL_LIST_FILE")
+    _google_lc=$(get_plain_list_count "$GOOGLE_LIST_FILE")
     _user_lc=$(get_user_list_count)
 
     [ -n "$_ver" ] && echo "Module version: $_ver"
 
     if [ -n "$_pid" ]; then
-        echo "nfqws: [ON] (PID: $_pid)"
-        [ "$_pid_count" -gt 1 ] && echo "warning: multiple nfqws processes detected ($_pid_count)"
+        echo "nfqws2: [ON] (PID: $_pid)"
+        [ "$_pid_count" -gt 1 ] && echo "warning: multiple nfqws2 processes detected ($_pid_count)"
     else
-        echo "nfqws: [OFF]"
+        echo "nfqws2: [OFF]"
     fi
 
     echo "iptables rules: $_rules (IPv4), $_rules6 (IPv6)"
     print_profile_status
     echo ""
 
-    if [ -f "$LISTS/list-general.txt" ]; then
+    if [ -f "$GENERAL_LIST_FILE" ]; then
         echo "list-general.txt: $_lc domains"
     else
         echo "list-general.txt: MISSING"
+    fi
+
+    if [ -f "$GOOGLE_LIST_FILE" ]; then
+        echo "list-google.txt: $_google_lc domains"
+    else
+        echo "list-google.txt: MISSING"
     fi
 
     echo "list-user.txt: $_user_lc domains"
@@ -352,7 +423,8 @@ print_status_json() {
     _ver=$(get_version)
     _rules=$(get_rule_count iptables)
     _rules6=$(get_rule_count ip6tables)
-    _lc=$(get_list_count "$MODDIR/.list_count" "$LISTS/list-general.txt")
+    _lc=$(get_list_count "$LIST_COUNT_CACHE" "$GENERAL_LIST_FILE")
+    _google_lc=$(get_plain_list_count "$GOOGLE_LIST_FILE")
     _user_lc=$(get_user_list_count)
     _prof_name=$(get_active_profile)
     _prof_label=$(get_profile_label "$_prof_name")
@@ -362,29 +434,81 @@ print_status_json() {
         _user_attached=false
     fi
 
-    printf '{"version":"%s","active":%s,"pid":"%s","pid_count":%s,"rules_v4":%s,"rules_v6":%s,"domain_count":%s,"user_domain_count":%s,"user_list_attached":%s,"profile":"%s","profile_label":"%s"}\n' \
-        "$(json_escape "$_ver")" "$_active" "$(json_escape "$_pid")" "$_pid_count" "$_rules" "$_rules6" "$_lc" "$_user_lc" "$_user_attached" "$(json_escape "$_prof_name")" "$(json_escape "$_prof_label")"
+    printf '{"version":"%s","active":%s,"pid":"%s","pid_count":%s,"rules_v4":%s,"rules_v6":%s,"domain_count":%s,"google_domain_count":%s,"user_domain_count":%s,"user_list_attached":%s,"profile":"%s","profile_label":"%s"}\n' \
+        "$(json_escape "$_ver")" "$_active" "$(json_escape "$_pid")" "$_pid_count" "$_rules" "$_rules6" "$_lc" "$_google_lc" "$_user_lc" "$_user_attached" "$(json_escape "$_prof_name")" "$(json_escape "$_prof_label")"
 }
 
 get_rule_count() {
     _tbl_cmd="$1"
-    $_tbl_cmd -t mangle -L "$CHAIN" -n 2>/dev/null | grep -c NFQUEUE
+    $_tbl_cmd -w -t mangle -L "$CHAIN" -n 2>/dev/null | grep -c NFQUEUE
+}
+
+check_jump_rule() {
+    _tbl_cmd="$1"
+    _hook="$2"
+    $_tbl_cmd -w -t mangle -C "$_hook" -j "$CHAIN" >/dev/null 2>&1
+}
+
+has_jump_rules() {
+    check_jump_rule iptables OUTPUT && return 0
+    check_jump_rule iptables FORWARD && return 0
+    check_jump_rule ip6tables OUTPUT && return 0
+    check_jump_rule ip6tables FORWARD && return 0
+    return 1
+}
+
+cleanup_jump_rules_local() {
+    while check_jump_rule iptables OUTPUT; do
+        iptables -w -t mangle -D OUTPUT -j "$CHAIN" >/dev/null 2>&1 || break
+    done
+    while check_jump_rule iptables FORWARD; do
+        iptables -w -t mangle -D FORWARD -j "$CHAIN" >/dev/null 2>&1 || break
+    done
+    iptables -w -t mangle -F "$CHAIN" >/dev/null 2>&1
+    iptables -w -t mangle -X "$CHAIN" >/dev/null 2>&1
+
+    while check_jump_rule ip6tables OUTPUT; do
+        ip6tables -w -t mangle -D OUTPUT -j "$CHAIN" >/dev/null 2>&1 || break
+    done
+    while check_jump_rule ip6tables FORWARD; do
+        ip6tables -w -t mangle -D FORWARD -j "$CHAIN" >/dev/null 2>&1 || break
+    done
+    ip6tables -w -t mangle -F "$CHAIN" >/dev/null 2>&1
+    ip6tables -w -t mangle -X "$CHAIN" >/dev/null 2>&1
+}
+
+wait_for_process_exit() {
+    _tries="${1:-15}"
+    while is_running && [ "$_tries" -gt 0 ]; do
+        sleep 0.1 2>/dev/null || sleep 1
+        _tries=$((_tries - 1))
+    done
+    ! is_running
+}
+
+run_uninstall_cleanup() {
+    "$MODDIR/uninstall.sh" >/dev/null 2>&1 || true
 }
 
 # Service control
 start_service() {
-    sh "$MODDIR/service.sh" manual || return 1
+    "$MODDIR/service.sh" manual || return 1
     is_running
 }
 
 stop_service() {
-    sh "$MODDIR/uninstall.sh" || return 1
-    is_running && return 1
-    # Verify all chains are fully removed (OUTPUT + FORWARD).
-    iptables -t mangle -C OUTPUT -j "$CHAIN" >/dev/null 2>&1 && return 1
-    iptables -t mangle -C FORWARD -j "$CHAIN" >/dev/null 2>&1 && return 1
-    ip6tables -t mangle -C OUTPUT -j "$CHAIN" >/dev/null 2>&1 && return 1
-    ip6tables -t mangle -C FORWARD -j "$CHAIN" >/dev/null 2>&1 && return 1
+    run_uninstall_cleanup
+
+    if ! wait_for_process_exit 15; then
+        killall -9 "$PROCESS_NAME" 2>/dev/null
+        wait_for_process_exit 3 || return 1
+    fi
+
+    if has_jump_rules; then
+        cleanup_jump_rules_local
+        has_jump_rules && return 1
+    fi
+
     return 0
 }
 
@@ -408,17 +532,40 @@ download_to_tmp() {
 }
 
 update_list_file() {
-    if download_to_tmp "$DEFAULT_LIST_SOURCE" "$LISTS/list-general.txt" "list-general.txt"; then
+    if download_to_tmp "$DEFAULT_LIST_SOURCE" "$GENERAL_LIST_FILE" "list-general.txt"; then
         return 0
     fi
     return 1
 }
 
-restart_if_running() {
+list_required_runtime_files() {
+    _active_profile_config=$(get_active_profile_config)
+    printf '%s\n' \
+        "$BIN" \
+        "$_active_profile_config" \
+        "$GENERAL_LIST_FILE" \
+        "$USER_LIST_FILE" \
+        "$GOOGLE_LIST_FILE" \
+        "$LUA_DIR/zapret-lib.lua" \
+        "$LUA_DIR/zapret-antidpi.lua" \
+        "$PAYLOAD_QUIC_FILE" \
+        "$PAYLOAD_TLS_FILE"
+}
+
+refresh_hostlists_if_running() {
     if is_running; then
-        echo "[*] Restarting nfqws to apply changes..."
-        "$0" restart
-        return $?
+        _reloaded=0
+        for _pid in $(list_live_pids); do
+            if kill -HUP "$_pid" 2>/dev/null; then
+                _reloaded=1
+            fi
+        done
+        if [ "$_reloaded" = "1" ]; then
+            echo "[*] Sent SIGHUP to nfqws2 to refresh hostlists."
+        else
+            echo "[*] nfqws2 is running. Hostlists reload automatically after file changes."
+        fi
+        return 0
     fi
     echo "[*] nzapret is not running. Changes will apply on next start."
     return 0
@@ -429,75 +576,64 @@ run_diagnose() {
     echo "nzapret diagnostics"
     echo "--------------------"
 
-    for _cmd in iptables ip6tables pgrep tail curl ip; do
-        if command -v "$_cmd" >/dev/null 2>&1; then
-            echo "[OK] command available: $_cmd"
+    for _cmd in $DIAGNOSE_COMMANDS; do
+        if has_cmd "$_cmd"; then
+            print_human_check ok "command available: $_cmd"
         else
-            echo "[!!] missing command: $_cmd"
+            print_human_check fail "missing command: $_cmd"
         fi
     done
 
-    _active_profile=$(get_active_profile)
-    _active_profile_config=$(get_profile_config_file "$_active_profile")
-
-    for _file in \
-        "$BIN" \
-        "$_active_profile_config" \
-        "$LISTS/list-general.txt" \
-        "$USER_LIST_FILE" \
-        "$LISTS/list-google.txt" \
-        "$PAYLOADS/quic_initial_www_google_com.bin" \
-        "$PAYLOADS/tls_clienthello_www_google_com.bin"; do
+    for _file in $(list_required_runtime_files); do
         if [ -f "$_file" ]; then
-            echo "[OK] file present: $_file"
+            print_human_check ok "file present: $_file"
         else
-            echo "[!!] missing file: $_file"
+            print_human_check fail "missing file: $_file"
         fi
     done
 
     _pid=$(get_first_pid)
     if [ -n "$_pid" ]; then
-        echo "[OK] nfqws running (PID: $_pid)"
+        print_human_check ok "$PROCESS_NAME running (PID: $_pid)"
     else
-        echo "[!!] nfqws is not running"
+        print_human_check fail "$PROCESS_NAME is not running"
     fi
 
     if active_profile_uses_user_list; then
-        echo "[OK] active profile includes list-user.txt"
+        print_human_check ok "active profile includes list-user.txt"
     else
-        echo "[!!] active profile does not reference list-user.txt"
+        print_human_check fail "active profile does not reference list-user.txt"
     fi
 
-    # Check all jump rules (OUTPUT + FORWARD)
-    for _chain in OUTPUT FORWARD; do
-        if iptables -t mangle -C "$_chain" -j "$CHAIN" >/dev/null 2>&1; then
-            echo "[OK] iptables $_chain jump present"
+    for _hook in OUTPUT FORWARD; do
+        if check_jump_rule iptables "$_hook"; then
+            print_human_check ok "iptables $_hook jump present"
         else
-            echo "[!!] iptables $_chain jump missing"
+            print_human_check fail "iptables $_hook jump missing"
         fi
 
-        if ip6tables -t mangle -C "$_chain" -j "$CHAIN" >/dev/null 2>&1; then
-            echo "[OK] ip6tables $_chain jump present"
+        if check_jump_rule ip6tables "$_hook"; then
+            print_human_check ok "ip6tables $_hook jump present"
         else
-            echo "[!!] ip6tables $_chain jump missing"
+            print_human_check fail "ip6tables $_hook jump missing"
         fi
     done
 
-    if command -v ip >/dev/null 2>&1; then
+    if has_cmd ip; then
         if ip route get 1.1.1.1 >/dev/null 2>&1; then
-            echo "[OK] IPv4 route lookup works"
+            print_human_check ok "IPv4 route lookup works"
         else
-            echo "[!!] IPv4 route lookup failed"
+            print_human_check fail "IPv4 route lookup failed"
         fi
 
         if ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 '; then
             if ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1; then
-                echo "[OK] IPv6 route lookup works"
+                print_human_check ok "IPv6 route lookup works"
             else
-                echo "[!!] IPv6 route lookup failed"
+                print_human_check fail "IPv6 route lookup failed"
             fi
         else
-            echo "[OK] IPv6 not configured on active network"
+            print_human_check ok "IPv6 not configured on active network"
         fi
     fi
 
@@ -510,94 +646,63 @@ run_diagnose_json() {
     _fail=0
     _sep=""
 
-    for _cmd in iptables ip6tables pgrep tail curl ip; do
-        if command -v "$_cmd" >/dev/null 2>&1; then
-            _checks="${_checks}${_sep}{\"name\":\"$(json_escape "$_cmd")\",\"status\":\"ok\",\"detail\":\"command available\"}"
-            _ok=$((_ok + 1))
+    for _cmd in $DIAGNOSE_COMMANDS; do
+        if has_cmd "$_cmd"; then
+            append_json_check "$_cmd" "ok" "command available"
         else
-            _checks="${_checks}${_sep}{\"name\":\"$(json_escape "$_cmd")\",\"status\":\"fail\",\"detail\":\"command missing\"}"
-            _fail=$((_fail + 1))
+            append_json_check "$_cmd" "fail" "command missing"
         fi
-        _sep=","
     done
 
-    _active_profile=$(get_active_profile)
-    _active_profile_config=$(get_profile_config_file "$_active_profile")
-
-    for _file in \
-        "$BIN" \
-        "$_active_profile_config" \
-        "$LISTS/list-general.txt" \
-        "$USER_LIST_FILE" \
-        "$LISTS/list-google.txt" \
-        "$PAYLOADS/quic_initial_www_google_com.bin" \
-        "$PAYLOADS/tls_clienthello_www_google_com.bin"; do
+    for _file in $(list_required_runtime_files); do
         _fname=$(basename "$_file")
         if [ -f "$_file" ]; then
-            _checks="${_checks}${_sep}{\"name\":\"$(json_escape "$_fname")\",\"status\":\"ok\",\"detail\":\"file present\"}"
-            _ok=$((_ok + 1))
+            append_json_check "$_fname" "ok" "file present"
         else
-            _checks="${_checks}${_sep}{\"name\":\"$(json_escape "$_fname")\",\"status\":\"fail\",\"detail\":\"file missing\"}"
-            _fail=$((_fail + 1))
+            append_json_check "$_fname" "fail" "file missing"
         fi
-        _sep=","
     done
 
     _pid=$(get_first_pid)
     if [ -n "$_pid" ]; then
-        _checks="${_checks}${_sep}{\"name\":\"nfqws process\",\"status\":\"ok\",\"detail\":\"running (pid: $_pid)\"}"
-        _ok=$((_ok + 1))
+        append_json_check "$PROCESS_NAME process" "ok" "running (pid: $_pid)"
     else
-        _checks="${_checks}${_sep}{\"name\":\"nfqws process\",\"status\":\"fail\",\"detail\":\"not running\"}"
-        _fail=$((_fail + 1))
+        append_json_check "$PROCESS_NAME process" "fail" "not running"
     fi
-    _sep=","
 
     if active_profile_uses_user_list; then
-        _checks="${_checks}${_sep}{\"name\":\"list-user binding\",\"status\":\"ok\",\"detail\":\"active profile includes list-user.txt\"}"
-        _ok=$((_ok + 1))
+        append_json_check "list-user binding" "ok" "active profile includes list-user.txt"
     else
-        _checks="${_checks}${_sep}{\"name\":\"list-user binding\",\"status\":\"fail\",\"detail\":\"active profile does not reference list-user.txt\"}"
-        _fail=$((_fail + 1))
+        append_json_check "list-user binding" "fail" "active profile does not reference list-user.txt"
     fi
-    _sep=","
 
-    for _ct in OUTPUT FORWARD; do
-        if iptables -t mangle -C "$_ct" -j "$CHAIN" >/dev/null 2>&1; then
-            _checks="${_checks}${_sep}{\"name\":\"iptables $_ct\",\"status\":\"ok\",\"detail\":\"jump present\"}"
-            _ok=$((_ok + 1))
+    for _hook in OUTPUT FORWARD; do
+        if check_jump_rule iptables "$_hook"; then
+            append_json_check "iptables $_hook" "ok" "jump present"
         else
-            _checks="${_checks}${_sep}{\"name\":\"iptables $_ct\",\"status\":\"fail\",\"detail\":\"jump missing\"}"
-            _fail=$((_fail + 1))
+            append_json_check "iptables $_hook" "fail" "jump missing"
         fi
-        if ip6tables -t mangle -C "$_ct" -j "$CHAIN" >/dev/null 2>&1; then
-            _checks="${_checks}${_sep}{\"name\":\"ip6tables $_ct\",\"status\":\"ok\",\"detail\":\"jump present\"}"
-            _ok=$((_ok + 1))
+        if check_jump_rule ip6tables "$_hook"; then
+            append_json_check "ip6tables $_hook" "ok" "jump present"
         else
-            _checks="${_checks}${_sep}{\"name\":\"ip6tables $_ct\",\"status\":\"fail\",\"detail\":\"jump missing\"}"
-            _fail=$((_fail + 1))
+            append_json_check "ip6tables $_hook" "fail" "jump missing"
         fi
     done
 
-    if command -v ip >/dev/null 2>&1; then
+    if has_cmd ip; then
         if ip route get 1.1.1.1 >/dev/null 2>&1; then
-            _checks="${_checks}${_sep}{\"name\":\"IPv4 routing\",\"status\":\"ok\",\"detail\":\"route lookup works\"}"
-            _ok=$((_ok + 1))
+            append_json_check "IPv4 routing" "ok" "route lookup works"
         else
-            _checks="${_checks}${_sep}{\"name\":\"IPv4 routing\",\"status\":\"fail\",\"detail\":\"route lookup failed\"}"
-            _fail=$((_fail + 1))
+            append_json_check "IPv4 routing" "fail" "route lookup failed"
         fi
         if ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 '; then
             if ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1; then
-                _checks="${_checks}${_sep}{\"name\":\"IPv6 routing\",\"status\":\"ok\",\"detail\":\"route lookup works\"}"
-                _ok=$((_ok + 1))
+                append_json_check "IPv6 routing" "ok" "route lookup works"
             else
-                _checks="${_checks}${_sep}{\"name\":\"IPv6 routing\",\"status\":\"fail\",\"detail\":\"route lookup failed\"}"
-                _fail=$((_fail + 1))
+                append_json_check "IPv6 routing" "fail" "route lookup failed"
             fi
         else
-            _checks="${_checks}${_sep}{\"name\":\"IPv6 routing\",\"status\":\"ok\",\"detail\":\"not configured\"}"
-            _ok=$((_ok + 1))
+            append_json_check "IPv6 routing" "ok" "not configured"
         fi
     fi
 
@@ -648,15 +753,15 @@ ensure_runtime_layout
 case "$1" in
     "start")
         if is_running; then
-            echo "[!] nfqws is already running. Use 'nzapret restart' instead."
+            echo "[!] nfqws2 is already running. Use 'nzapret restart' instead."
             exit 1
         fi
         echo "[*] Starting nzapret..."
         if start_service; then
             _pid=$(get_first_pid)
-            echo "[+] nfqws started successfully (PID: $_pid)"
+            echo "[+] nfqws2 started successfully (PID: $_pid)"
         else
-            echo "[-] Failed to start nfqws. Check 'nzapret log' for details."
+            echo "[-] Failed to start nfqws2. Check 'nzapret log' for details."
             exit 1
         fi
         ;;
@@ -666,22 +771,26 @@ case "$1" in
         if stop_service; then
             echo "[+] Stopped"
         else
-            echo "[-] Failed to stop cleanly. Check 'nzapret log' for details."
-            exit 1
+            if ! has_jump_rules; then
+                echo "[+] Stopped"
+            else
+                echo "[-] Failed to stop cleanly. Check 'nzapret log' for details."
+                exit 1
+            fi
         fi
         ;;
 
     "restart")
         echo "[*] Restarting nzapret..."
         if ! stop_service; then
-            echo "[-] Failed to stop current nfqws instance cleanly."
+            echo "[-] Failed to stop current nfqws2 instance cleanly."
             exit 1
         fi
         if start_service; then
             _pid=$(get_first_pid)
-            echo "[+] nfqws restarted successfully (PID: $_pid)"
+            echo "[+] nfqws2 restarted successfully (PID: $_pid)"
         else
-            echo "[-] Failed to restart nfqws. Check 'nzapret log' for details."
+            echo "[-] Failed to restart nfqws2. Check 'nzapret log' for details."
             exit 1
         fi
         ;;
@@ -692,10 +801,10 @@ case "$1" in
             ""|"all"|"list")
                 echo "[*] Updating list-general.txt..."
                 if update_list_file; then
-                    _new_count=$(wc -l < "$LISTS/list-general.txt" 2>/dev/null || echo "?")
+                    _new_count=$(wc -l < "$GENERAL_LIST_FILE" 2>/dev/null || echo "?")
                     log_event UPDATE "list-general.txt updated ($_new_count domains)"
                     refresh_counts
-                    restart_if_running
+                    refresh_hostlists_if_running
                 else
                     log_event ERROR "list-general.txt update failed"
                     exit 1
@@ -719,8 +828,8 @@ case "$1" in
         _pid=$(get_first_pid)
         _pid_count=$(get_pid_count)
         if [ -n "$_pid" ] && [ -d "/proc/$_pid" ]; then
-            echo "nfqws is running (PID: $_pid)"
-            [ "$_pid_count" -gt 1 ] && echo "warning: multiple nfqws processes detected ($_pid_count)"
+            echo "nfqws2 is running (PID: $_pid)"
+            [ "$_pid_count" -gt 1 ] && echo "warning: multiple nfqws2 processes detected ($_pid_count)"
             echo "Cmdline:"
             cat /proc/$_pid/cmdline 2>/dev/null | tr '\0' ' '
             echo ""
@@ -728,7 +837,7 @@ case "$1" in
             echo "Open files: $(ls /proc/$_pid/fd 2>/dev/null | wc -l)"
             echo "Memory: $(grep VmRSS /proc/$_pid/status 2>/dev/null)"
         else
-            echo "nfqws is not running"
+            echo "nfqws2 is not running"
         fi
 
         echo ""
@@ -790,7 +899,7 @@ case "$1" in
                 _user_count=$(get_user_list_count)
                 log_event USERLIST "added $_added domains ($_user_count total)"
                 echo "[+] Added $_added domains to list-user.txt ($_user_count total)"
-                restart_if_running || exit 1
+                refresh_hostlists_if_running
                 ;;
             "remove")
                 shift 2
@@ -811,7 +920,7 @@ case "$1" in
                 fi
                 log_event USERLIST "removed $_removed domains ($_after total)"
                 echo "[+] Removed $_removed domains from list-user.txt ($_after total)"
-                restart_if_running || exit 1
+                refresh_hostlists_if_running
                 ;;
             "replace")
                 shift 2
@@ -826,7 +935,7 @@ case "$1" in
                 _user_count=$(get_user_list_count)
                 log_event USERLIST "replaced list-user.txt ($_user_count total)"
                 echo "[+] Saved list-user.txt ($_user_count domains)"
-                restart_if_running || exit 1
+                refresh_hostlists_if_running
                 ;;
             "clear")
                 _before=$(get_user_list_count)
@@ -837,7 +946,7 @@ case "$1" in
                 if [ "$_before" -gt 0 ]; then
                     echo "[+] list-user.txt cleared"
                     log_event USERLIST "cleared list-user.txt"
-                    restart_if_running || exit 1
+                    refresh_hostlists_if_running
                 else
                     echo "[*] list-user.txt is already empty"
                 fi
@@ -888,15 +997,15 @@ case "$1" in
         echo "Commands:"
         echo "  start                       - start traffic interception"
         echo "  stop                        - stop interception and clear rules"
-        echo "  restart                     - restart nfqws and iptables rules"
+        echo "  restart                     - restart nfqws2 and iptables rules"
         echo "  update [list]               - update routing hostlist"
-        echo "  status                      - show nfqws, iptables and list info"
+        echo "  status                      - show nfqws2, iptables and list info"
         echo "  status --json               - machine-readable status for WebUI"
-        echo "  log                         - show nfqws runtime log"
+        echo "  log                         - show nfqws2 runtime log"
         echo "  events                      - show event history"
         echo "  events clear                - clear the whole event log file"
         echo "  events --json [--tail=N]    - event history as JSON"
-        echo "  profile <subcommand>        - show, list or switch nfqws profiles"
+        echo "  profile <subcommand>        - show, list or switch nfqws2 profiles"
         echo "  list-user <subcommand>      - manage the personal domain hostlist"
         echo "  diagnose                    - run Android-side diagnostics"
         echo "  diagnose --json             - diagnostics as JSON for WebUI"

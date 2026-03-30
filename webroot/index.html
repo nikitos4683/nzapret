@@ -46,7 +46,7 @@
                     <div class="status-badge" id="pidBadge">PID --</div>
                 </div>
                 <div class="status-grid">
-                    <div class="status-item" style="grid-column: 1 / -1;">
+                    <div class="status-item status-item-wide">
                         <span class="status-item-label">Routing Profile</span>
                         <span class="status-item-value" id="profileName">--</span>
                     </div>
@@ -54,17 +54,25 @@
                         <span class="status-item-label">Domains</span>
                         <span class="status-item-value" id="domainCount">0</span>
                     </div>
-                    <div class="status-item">
-                        <span class="status-item-label">Personal Domains</span>
-                        <span class="status-item-value" id="userDomainCount">0</span>
+                    <div class="status-pair-row">
+                        <div class="status-pair-item">
+                            <span class="status-pair-label">Google Domains</span>
+                            <span class="status-pair-value" id="googleDomainCount">0</span>
+                        </div>
+                        <div class="status-pair-item">
+                            <span class="status-pair-label">Personal Domains</span>
+                            <span class="status-pair-value" id="userDomainCount">0</span>
+                        </div>
                     </div>
-                    <div class="status-item">
-                        <span class="status-item-label">IPv4 Rules</span>
-                        <span class="status-item-value" id="rulesV4">0</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-item-label">IPv6 Rules</span>
-                        <span class="status-item-value" id="rulesV6">0</span>
+                    <div class="status-pair-row">
+                        <div class="status-pair-item">
+                            <span class="status-pair-label">IPv4 Rules</span>
+                            <span class="status-pair-value" id="rulesV4">0</span>
+                        </div>
+                        <div class="status-pair-item">
+                            <span class="status-pair-label">IPv6 Rules</span>
+                            <span class="status-pair-value" id="rulesV6">0</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -102,7 +110,7 @@
                 <div class="panel-head">
                     <div>
                         <div class="panel-title">Personal Domain List</div>
-                        <div class="panel-subtitle">Add or remove domains, then tap Save. Reload restores the saved list from the device, and saving restarts nzapret if it is already running.</div>
+                        <div class="panel-subtitle">Add or remove domains, then tap Save. Reload restores the saved list from the device, and nfqws2 will pick hostlist changes up without a restart.</div>
                     </div>
                     <div class="panel-actions">
                         <button class="icon-btn" id="btnReloadUserList" type="button" onclick="reloadUserList()">Reload</button>
@@ -186,11 +194,11 @@
                 <div class="panel-head">
                     <div>
                         <div class="panel-title">Logs</div>
-                        <div class="panel-subtitle" id="logMeta">nfqws stdout / stderr</div>
+                        <div class="panel-subtitle" id="logMeta">nfqws2 stdout / stderr</div>
                     </div>
                     <div class="log-tabs">
                         <div class="log-tab-group">
-                            <button class="log-tab-btn active" id="btnRuntimeTab" onclick="setLogView('runtime')">nfqws Log</button>
+                            <button class="log-tab-btn active" id="btnRuntimeTab" onclick="setLogView('runtime')">nfqws2</button>
                             <button class="log-tab-btn" id="btnEventsTab" onclick="setLogView('events')">Events</button>
                         </div>
                     </div>
@@ -204,9 +212,9 @@
                 </div>
 
                 <div class="log-status-bar" id="logStatusBar">
-                    <div class="log-live-dot" id="logLiveDot" style="display:none;"></div>
-                    <span class="log-live-label" id="logLiveLabel" style="display:none;">LIVE</span>
-                    <div class="log-status-sep" id="logLiveSep" style="display:none;"></div>
+                    <div class="log-live-dot" id="logLiveDot" hidden></div>
+                    <span class="log-live-label" id="logLiveLabel" hidden>LIVE</span>
+                    <div class="log-status-sep" id="logLiveSep" hidden></div>
                     <span id="logLineCount">--</span>
                     <button class="event-clear-btn" id="btnClearEvents" onclick="clearEventsLog()" hidden>
                         <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
@@ -254,12 +262,13 @@
         let userScrolledUp = false;
         let diagnosticsData = null;
         let diagnosticsExpanded = false;
+        let toastTimer = null;
 
         function shellQuote(value) {
-            return "'" + String(value).replace(/'/g, "'\\''" ) + "'";
+            return "'" + String(value).replace(/'/g, "'\\''") + "'";
         }
 
-        function setUiLocked(locked, message =     'Applying changes...') {
+        function setUiLocked(locked, message = 'Applying changes...') {
             const overlay = document.getElementById('uiLock');
             const text = document.getElementById('uiLockText');
             text.textContent = message;
@@ -275,9 +284,15 @@
 
         function showToast(msg) {
             const t = document.getElementById('toast');
+            if (toastTimer) {
+                clearTimeout(toastTimer);
+            }
             t.textContent = msg;
             t.classList.add('show');
-            setTimeout(() => t.classList.remove('show'), 2500);
+            toastTimer = setTimeout(() => {
+                t.classList.remove('show');
+                toastTimer = null;
+            }, 2500);
         }
 
         function fmt(n) {
@@ -434,7 +449,7 @@
                 const count = eventsData.length;
                 meta.textContent = count ? `${count} event${count === 1 ? '' : 's'}` : 'Event history';
             } else {
-                meta.textContent = 'nfqws stdout / stderr';
+                meta.textContent = 'nfqws2 stdout / stderr';
             }
         }
 
@@ -442,9 +457,9 @@
             const isLive = activeLogView === 'runtime' && logInterval !== null;
             const clearButton = document.getElementById('btnClearEvents');
             const jumpButton = document.getElementById('logJumpBtn');
-            document.getElementById('logLiveDot').style.display = isLive ? '' : 'none';
-            document.getElementById('logLiveLabel').style.display = isLive ? '' : 'none';
-            document.getElementById('logLiveSep').style.display = isLive ? '' : 'none';
+            document.getElementById('logLiveDot').hidden = !isLive;
+            document.getElementById('logLiveLabel').hidden = !isLive;
+            document.getElementById('logLiveSep').hidden = !isLive;
 
             if (activeLogView === 'runtime') {
                 const lines = runtimeLogText ? runtimeLogText.split('\n').length : 0;
@@ -778,6 +793,7 @@
             document.getElementById('rulesV4').textContent = '?';
             document.getElementById('rulesV6').textContent = '?';
             document.getElementById('domainCount').textContent = '?';
+            document.getElementById('googleDomainCount').textContent = '?';
             document.getElementById('userDomainCount').textContent = '?';
 
             const card = document.getElementById('statusCard');
@@ -790,7 +806,6 @@
             label.textContent = reason;
 
             if (!isLoading) {
-                document.querySelectorAll('button').forEach((button) => button.classList.remove('disabled'));
                 updateActionButtons(false);
             }
             updateUserListEditorState();
@@ -801,8 +816,7 @@
             const {
                 loadingText = 'Applying changes...',
                 successText = 'Done',
-                refresh = true,
-                outputTitle = 'Command Output'
+                refresh = true
             } = options;
 
             if (isLoading) return { ok: false, skipped: true };
@@ -912,6 +926,7 @@
                 document.getElementById('rulesV4').textContent = status.rules_v4 ?? 0;
                 document.getElementById('rulesV6').textContent = status.rules_v6 ?? 0;
                 document.getElementById('domainCount').textContent = fmt(status.domain_count ?? 0);
+                document.getElementById('googleDomainCount').textContent = fmt(status.google_domain_count ?? 0);
                 document.getElementById('userDomainCount').textContent = fmt(status.user_domain_count ?? 0);
                 updateProfileSlider(status.profile);
                 updateUserListEditorState();
@@ -964,8 +979,7 @@
 
             await runCli(command, {
                 loadingText: loadingMap[primary] || 'Applying changes...',
-                successText: `${command} completed`,
-                outputTitle: command
+                successText: `${command} completed`
             });
 
             if (button) button.classList.remove('loading');
@@ -1017,8 +1031,7 @@
 
             const result = await runCli(`profile set ${shellQuote(name)}`, {
                 loadingText: 'Changing profile...',
-                successText: 'Profile set',
-                outputTitle: 'profile set'
+                successText: 'Profile set'
             });
             if (result.ok) {
                 showToast('Restart nzapret to apply changes');
@@ -1119,8 +1132,7 @@
 
             const result = await runCli(command, {
                 loadingText: entries.length ? 'Saving personal domains...' : 'Clearing personal domains...',
-                successText: entries.length ? 'Personal list saved' : 'Personal list cleared',
-                outputTitle: 'list-user'
+                successText: entries.length ? 'Personal list saved' : 'Personal list cleared'
             });
 
             if (result.ok) {
@@ -1182,6 +1194,9 @@
         });
 
         window.addEventListener('resize', updateLogPanelHeight);
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', updateLogPanelHeight);
+        }
 
         // --- Exports ---
         window.doAction = doAction;
