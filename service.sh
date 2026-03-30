@@ -9,13 +9,12 @@ IP6T="ip6tables -w"
 CHAIN="nzapret_out"
 LOGFILE="$MODDIR/nzapret.log"
 EVENTLOG="$MODDIR/nzapret-events.log"
-UTILS="$MODDIR/utils"
 LISTS="$MODDIR/lists"
 USER_LIST_FILE="$LISTS/list-user.txt"
 PAYLOADS="$MODDIR/payloads"
 BIN="$MODDIR/bin/nfqws"
-ACTIVE_PROFILE_FILE="$UTILS/profile.current"
 PROFILE_DIR="$MODDIR/profiles"
+ACTIVE_PROFILE_FILE="$PROFILE_DIR/profile.current"
 DEFAULT_PROFILE="default"
 START_MODE="${1:-boot}"
 
@@ -228,7 +227,7 @@ fi
 require_cmd iptables
 require_cmd ip6tables
 require_cmd killall
-mkdir -p "$UTILS" "$PROFILE_DIR" "$LISTS" || fail "mkdir -p failed"
+mkdir -p "$PROFILE_DIR" "$LISTS" || fail "mkdir -p failed"
 ensure_user_list_file
 
 # Prepare binaries

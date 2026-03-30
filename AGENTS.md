@@ -35,10 +35,10 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
   - Architecture-specific binaries. `customize.sh` renames the selected one to `bin/nfqws` during install.
 - `webroot/`
   - KernelSU WebUI (`index.html`, `style.css`, `kernelsu.js`).
-- `utils/`
-  - Mutable runtime state such as `profile.current`.
 - `META-INF/com/google/android/*`
   - Installer glue for the flashable module ZIP.
+- `profiles/profile.current`
+  - Mutable active-profile pointer consumed by runtime and CLI.
 - `build.sh`
   - Packaging helper: stages the module, normalizes text line endings to LF, removes runtime artifacts, and builds the ZIP.
 - `.github/workflows/release.yml`
@@ -60,7 +60,7 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
 
 - Treat the installed module path as a coordinated constant.
   - `system/bin/nzapret` hardcodes `MODDIR="/data/adb/modules/nzapret"`.
-  - `profiles/default.conf` uses absolute installed paths under `/data/adb/modules/nzapret/...`.
+  - `profiles/default.conf` and `profiles/profile.current` live under `/data/adb/modules/nzapret/profiles/...`.
   - `webroot/index.html` also shells out against `/data/adb/modules/nzapret`.
   - Changing module ID or install path requires synchronized updates across multiple files.
 
@@ -107,7 +107,7 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
   - `service.sh` intentionally bypasses loopback and common VPN interfaces (`lo`, `tun+`, `wg+`, `tap+`).
 
 - Runtime state is generated inside the module directory.
-  - `utils/profile.current`, `.list_count`, `nzapret.log`, `nzapret.log.prev`, and `nzapret-events.log` are mutable artifacts.
+  - `profiles/profile.current`, `.list_count`, `nzapret.log`, `nzapret.log.prev`, and `nzapret-events.log` are mutable artifacts.
   - Do not hardcode assumptions that these files are committed or always present in a fresh checkout.
 
 - The update path is intentionally narrow.

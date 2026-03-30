@@ -12,19 +12,14 @@ BIN="$MODDIR/bin/nfqws"
 CHAIN="nzapret_out"
 LOGFILE="$MODDIR/nzapret.log"
 EVENTLOG="$MODDIR/nzapret-events.log"
-UTILS="$MODDIR/utils"
-ACTIVE_PROFILE_FILE="$UTILS/profile.current"
 PROFILE_DIR="$MODDIR/profiles"
+ACTIVE_PROFILE_FILE="$PROFILE_DIR/profile.current"
 DEFAULT_PROFILE="default"
 DEFAULT_LIST_SOURCE="https://raw.githubusercontent.com/bol-van/rulist/refs/heads/main/reestr_hostname.txt"
 
 # Helpers
-ensure_utils_dir() {
-    mkdir -p "$UTILS" >/dev/null 2>&1
-}
-
 ensure_runtime_layout() {
-    ensure_utils_dir
+    mkdir -p "$PROFILE_DIR" >/dev/null 2>&1
     mkdir -p "$LISTS" >/dev/null 2>&1
     [ -f "$USER_LIST_FILE" ] || : > "$USER_LIST_FILE" 2>/dev/null
 }
@@ -114,7 +109,7 @@ set_active_profile() {
         echo "[-] Unknown profile: $_pname"
         exit 1
     }
-    ensure_utils_dir
+    mkdir -p "$PROFILE_DIR" >/dev/null 2>&1
     printf '%s\n' "$_pname" > "$ACTIVE_PROFILE_FILE"
 }
 

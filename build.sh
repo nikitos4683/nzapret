@@ -49,7 +49,6 @@ MODULE_ENTRIES=(
     "payloads"
     "profiles"
     "system"
-    "utils"
     "webroot"
 )
 
@@ -89,9 +88,11 @@ find "$STAGE_DIR" -type f \( \
     -name "*.conf" -o \
     -name "updater-script" \
 \) -exec sed -i 's/\r$//' {} +
-find "$STAGE_DIR/utils" -type f -exec sed -i 's/\r$//' {} +
 
-# Explicitly fix extension-less shell scripts
+# Explicitly fix extension-less text files
+if [ -f "$STAGE_DIR/profiles/profile.current" ]; then
+    sed -i 's/\r$//' "$STAGE_DIR/profiles/profile.current"
+fi
 if [ -f "$STAGE_DIR/system/bin/nzapret" ]; then
     sed -i 's/\r$//' "$STAGE_DIR/system/bin/nzapret"
 fi
