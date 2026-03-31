@@ -1,7 +1,7 @@
 id=nzapret
 name=nzapret
-version=v2.0.0
-versionCode=3
+version=v2.0.1
+versionCode=4
 author=nikitos4683
 description=Android DPI-bypass utility built on nfqws2 and iptables, inspired by ideas from bol-van/zapret2.
 webui=true

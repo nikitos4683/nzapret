@@ -8,7 +8,7 @@
 ![Root](https://img.shields.io/badge/Root-Magisk%20%7C%20KernelSU-1f6feb?style=for-the-badge)
 ![Engine](https://img.shields.io/badge/Engine-nfqws2-f59e0b?style=for-the-badge)
 ![UI](https://img.shields.io/badge/UI-KernelSU%20WebUI-8b5cf6?style=for-the-badge)
-![Version](https://img.shields.io/badge/Version-v2.0.0-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-v2.0.1-blue?style=for-the-badge)
 
 </div>
 
