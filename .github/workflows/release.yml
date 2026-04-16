@@ -24,19 +24,80 @@ jobs:
       - name: 🔍 Get Version Info
         id: vars
         run: |
-          # Extract the module version directly from module.prop
+          set -eu
+
+          # Extract the module version directly from module.prop.
           VERSION=$(grep '^version=' module.prop | cut -d= -f2 | tr -d '\r\n')
           VERSION_CODE=$(grep '^versionCode=' module.prop | cut -d= -f2 | tr -d '\r\n')
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "ZIP_NAME=nzapret-${VERSION}.zip" >> $GITHUB_ENV
-          
-          # Generate update.json for Magisk/KernelSU OTA
+          ZIP_NAME="nzapret-${VERSION}.zip"
+          PREVIOUS_TAG=$(git tag --sort=-v:refname | grep -Fxv "$VERSION" | head -n 1 || true)
+          REPO_URL="https://github.com/${GITHUB_REPOSITORY}"
+          MANUAL_CHANGELOG=".github/release-notes/${VERSION}.md"
+          CHANGELOG_FILE="changelog.md"
+
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+
+          if [ -f "$MANUAL_CHANGELOG" ]; then
+            cp "$MANUAL_CHANGELOG" "$CHANGELOG_FILE"
+          else
+            RANGE_SPEC="HEAD"
+            if [ -n "$PREVIOUS_TAG" ]; then
+              RANGE_SPEC="${PREVIOUS_TAG}..HEAD"
+            fi
+
+            COMMITS_FILE=$(mktemp)
+            git log --reverse --pretty=format:%s "$RANGE_SPEC" \
+              | grep -Eiv '^chore(\([^)]+\))?: bump release to ' > "$COMMITS_FILE" || true
+
+            emit_section() {
+              title="$1"
+              pattern="$2"
+              matches=$(grep -Ei "$pattern" "$COMMITS_FILE" || true)
+              [ -n "$matches" ] || return 0
+
+              printf '## %s\n\n' "$title" >> "$CHANGELOG_FILE"
+              printf '%s\n' "$matches" | sed -E 's/^[[:alpha:]]+(\([^)]+\))?: /- /I' >> "$CHANGELOG_FILE"
+              printf '\n' >> "$CHANGELOG_FILE"
+            }
+
+            {
+              printf '# nzapret %s\n\n' "$VERSION"
+              if [ -n "$PREVIOUS_TAG" ]; then
+                printf 'Changes since `%s`\n\n' "$PREVIOUS_TAG"
+              else
+                printf 'Release notes\n\n'
+              fi
+            } > "$CHANGELOG_FILE"
+
+            emit_section "Features" '^feat(\([^)]+\))?: '
+            emit_section "Fixes" '^(fix|refactor|perf)(\([^)]+\))?: '
+            emit_section "Maintenance" '^(docs|ci|chore|test|build)(\([^)]+\))?: '
+
+            OTHER_COMMITS=$(grep -Eiv '^(feat|fix|refactor|perf|docs|ci|chore|test|build)(\([^)]+\))?: ' "$COMMITS_FILE" || true)
+            if [ -n "$OTHER_COMMITS" ]; then
+              printf '## Other\n\n' >> "$CHANGELOG_FILE"
+              printf '%s\n' "$OTHER_COMMITS" | sed 's/^/- /' >> "$CHANGELOG_FILE"
+              printf '\n' >> "$CHANGELOG_FILE"
+            fi
+
+            if ! grep -q '^- ' "$CHANGELOG_FILE"; then
+              printf '## Changes\n\n- Maintenance release.\n\n' >> "$CHANGELOG_FILE"
+            fi
+
+            if [ -n "$PREVIOUS_TAG" ]; then
+              printf '[Compare changes](%s/compare/%s...%s)\n' "$REPO_URL" "$PREVIOUS_TAG" "$VERSION" >> "$CHANGELOG_FILE"
+            fi
+          fi
+
+          # Generate update.json for Magisk/KernelSU OTA.
+          # Root managers expect changelog to resolve to readable text/markdown, not an HTML release page.
           cat <<EOF > update.json
           {
             "version": "$VERSION",
             "versionCode": $VERSION_CODE,
-            "zipUrl": "https://github.com/nikitos4683/nzapret/releases/download/$VERSION/nzapret-${VERSION}.zip",
-            "changelog": "https://github.com/nikitos4683/nzapret/releases/tag/$VERSION"
+            "zipUrl": "$REPO_URL/releases/download/$VERSION/$ZIP_NAME",
+            "changelog": "$REPO_URL/releases/download/$VERSION/changelog.md"
           }
           EOF
 
@@ -47,7 +108,9 @@ jobs:
           name: "nzapret ${{ env.VERSION }}"
           files: |
             ${{ env.ZIP_NAME }}
+            changelog.md
             update.json
-          generate_release_notes: true
+          body_path: changelog.md
+          generate_release_notes: false
           draft: false
           prerelease: false
