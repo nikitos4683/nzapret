@@ -78,19 +78,25 @@ normalize_network_mode() {
     esac
 }
 
-detect_default_network_mode() {
-    if has_cmd ip; then
-        if ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 '; then
-            if ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1; then
-                echo "auto"
-                return
-            fi
-        fi
+ipv6_network_available() {
+    has_cmd ip || return 1
+    ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 ' || return 1
+    ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1
+}
 
+detect_default_network_mode() {
+    if ipv6_network_available; then
+        echo "auto"
+        return
+    fi
+
+    if has_cmd ip; then
         if ip route get 1.1.1.1 >/dev/null 2>&1; then
             echo "ipv4-only"
             return
         fi
+        echo "ipv4-only"
+        return
     fi
 
     if ip6tables_supported; then
@@ -137,7 +143,7 @@ resolve_network_mode() {
             log_event NETWORK "mode ipv4-only: IPv6 firewall disabled"
             ;;
         *)
-            if ip6tables_supported; then
+            if ipv6_network_available && ip6tables_supported; then
                 IPV6_ENABLED=1
                 log_event NETWORK "mode auto: IPv4 + IPv6 firewall enabled"
             else

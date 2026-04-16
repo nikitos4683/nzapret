@@ -64,19 +64,25 @@ normalize_network_mode() {
     esac
 }
 
-detect_default_network_mode() {
-    if has_cmd ip; then
-        if ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 '; then
-            if ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1; then
-                echo "auto"
-                return
-            fi
-        fi
+ipv6_network_available() {
+    has_cmd ip || return 1
+    ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 ' || return 1
+    ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1
+}
 
+detect_default_network_mode() {
+    if ipv6_network_available; then
+        echo "auto"
+        return
+    fi
+
+    if has_cmd ip; then
         if ip route get 1.1.1.1 >/dev/null 2>&1; then
             echo "ipv4-only"
             return
         fi
+        echo "ipv4-only"
+        return
     fi
 
     if ip6tables_supported; then
@@ -117,6 +123,11 @@ set_configured_network_mode() {
         echo "Usage: nzapret network set <auto|ipv4-only>"
         exit 1
     }
+    if [ "$_mode" = "auto" ] && ! ipv6_network_available; then
+        echo "[-] Cannot enable auto network mode: IPv6 is not available on this device/network"
+        echo "[*] Keep ipv4-only mode or switch to a network with IPv6 support"
+        exit 1
+    fi
     printf '%s\n' "$_mode" > "$NETWORK_MODE_FILE" || {
         echo "[-] Failed to save network mode"
         exit 1
@@ -137,7 +148,7 @@ ip6tables_supported() {
 
 ipv6_firewall_enabled() {
     [ "$(get_configured_network_mode)" = "ipv4-only" ] && return 1
-    ip6tables_supported
+    ipv6_network_available && ip6tables_supported
 }
 
 get_runtime_network_mode_label() {
@@ -147,7 +158,7 @@ get_runtime_network_mode_label() {
             echo "IPv4 only"
             ;;
         *)
-            if ip6tables_supported; then
+            if ipv6_network_available && ip6tables_supported; then
                 echo "Auto (IPv4 + IPv6)"
             else
                 echo "Auto (IPv4 only fallback)"
@@ -732,6 +743,11 @@ print_status_json() {
     else
         _user_attached=false
     fi
+    if ipv6_network_available; then
+        _ipv6_available=true
+    else
+        _ipv6_available=false
+    fi
     if ipv6_firewall_enabled; then
         _ipv6_enabled=true
     else
@@ -748,8 +764,8 @@ print_status_json() {
         _private_dns_initialized=false
     fi
 
-    printf '{"version":"%s","active":%s,"pid":"%s","pid_count":%s,"rules_v4":%s,"rules_v6":%s,"domain_count":%s,"google_domain_count":%s,"user_domain_count":%s,"user_list_attached":%s,"profile":"%s","profile_label":"%s","network_mode":"%s","network_mode_label":"%s","ipv6_enabled":%s,"private_dns_available":%s,"private_dns_initialized":%s,"private_dns_mode":"%s","private_dns_mode_label":"%s","private_dns_hostname":"%s","private_dns_label":"%s","private_dns_default_hostname":"%s"}\n' \
-        "$(json_escape "$_ver")" "$_active" "$(json_escape "$_pid")" "$_pid_count" "$_rules" "$_rules6" "$_lc" "$_google_lc" "$_user_lc" "$_user_attached" "$(json_escape "$_prof_name")" "$(json_escape "$_prof_label")" "$(json_escape "$_network_mode")" "$(json_escape "$_network_mode_label")" "$_ipv6_enabled" "$_private_dns_available" "$_private_dns_initialized" "$(json_escape "$_private_dns_mode")" "$(json_escape "$_private_dns_mode_label")" "$(json_escape "$_private_dns_hostname")" "$(json_escape "$_private_dns_label")" "$(json_escape "$DEFAULT_PRIVATE_DNS_HOSTNAME")"
+    printf '{"version":"%s","active":%s,"pid":"%s","pid_count":%s,"rules_v4":%s,"rules_v6":%s,"domain_count":%s,"google_domain_count":%s,"user_domain_count":%s,"user_list_attached":%s,"profile":"%s","profile_label":"%s","network_mode":"%s","network_mode_label":"%s","ipv6_available":%s,"ipv6_enabled":%s,"private_dns_available":%s,"private_dns_initialized":%s,"private_dns_mode":"%s","private_dns_mode_label":"%s","private_dns_hostname":"%s","private_dns_label":"%s","private_dns_default_hostname":"%s"}\n' \
+        "$(json_escape "$_ver")" "$_active" "$(json_escape "$_pid")" "$_pid_count" "$_rules" "$_rules6" "$_lc" "$_google_lc" "$_user_lc" "$_user_attached" "$(json_escape "$_prof_name")" "$(json_escape "$_prof_label")" "$(json_escape "$_network_mode")" "$(json_escape "$_network_mode_label")" "$_ipv6_available" "$_ipv6_enabled" "$_private_dns_available" "$_private_dns_initialized" "$(json_escape "$_private_dns_mode")" "$(json_escape "$_private_dns_mode_label")" "$(json_escape "$_private_dns_hostname")" "$(json_escape "$_private_dns_label")" "$(json_escape "$DEFAULT_PRIVATE_DNS_HOSTNAME")"
 }
 
 get_rule_count() {
@@ -968,14 +984,10 @@ run_diagnose() {
 
         if [ "$_network_mode" = "ipv4-only" ]; then
             print_human_check ok "IPv6 route lookup disabled by mode"
-        elif ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 '; then
-            if ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1; then
-                print_human_check ok "IPv6 route lookup works"
-            else
-                print_human_check fail "IPv6 route lookup failed"
-            fi
+        elif ipv6_network_available; then
+            print_human_check ok "IPv6 route lookup works"
         else
-            print_human_check ok "IPv6 not configured on active network"
+            print_human_check fail "IPv6 route lookup failed or not configured"
         fi
     fi
 
@@ -1063,14 +1075,10 @@ run_diagnose_json() {
         fi
         if [ "$_network_mode" = "ipv4-only" ]; then
             append_json_check "IPv6 routing" "ok" "disabled by mode"
-        elif ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 '; then
-            if ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1; then
-                append_json_check "IPv6 routing" "ok" "route lookup works"
-            else
-                append_json_check "IPv6 routing" "fail" "route lookup failed"
-            fi
+        elif ipv6_network_available; then
+            append_json_check "IPv6 routing" "ok" "route lookup works"
         else
-            append_json_check "IPv6 routing" "ok" "not configured"
+            append_json_check "IPv6 routing" "fail" "route lookup failed or not configured"
         fi
     fi
 
@@ -1247,6 +1255,11 @@ case "$1" in
             ""|"status")
                 echo "Configured mode: $(get_network_mode_label "$(get_configured_network_mode)")"
                 echo "Effective stack: $(get_runtime_network_mode_label)"
+                if ipv6_network_available; then
+                    echo "IPv6 available: yes"
+                else
+                    echo "IPv6 available: no"
+                fi
                 ;;
             "set")
                 [ -n "$3" ] || {

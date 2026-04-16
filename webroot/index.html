@@ -389,6 +389,8 @@
             const mode = getSelectedNetworkMode(status);
             const dirty = isNetworkModeDirty(status);
             const controlsDisabled = isLoading || !status;
+            const autoUnavailable = Boolean(status && status.ipv6_available === false);
+            const selectedAutoUnavailable = mode === 'auto' && autoUnavailable;
 
             if (label) {
                 label.textContent = status && status.network_mode_label ? status.network_mode_label : '--';
@@ -397,22 +399,42 @@
             if (dirtyNote) {
                 if (!status) {
                     dirtyNote.textContent = 'No unsaved changes.';
+                } else if (autoUnavailable) {
+                    dirtyNote.textContent = 'IPv6 is unavailable. Enable IPv6 in network settings, then return here.';
                 } else {
                     dirtyNote.textContent = dirty ? 'Unsaved changes.' : 'No unsaved changes.';
                 }
-                dirtyNote.classList.toggle('warning', dirty);
+                dirtyNote.classList.toggle('warning', dirty || autoUnavailable);
             }
 
             buttons.forEach((button) => {
                 const active = mode && button.dataset.networkMode === mode;
+                const unavailable = button.dataset.networkMode === 'auto' && autoUnavailable && !active;
                 button.classList.toggle('active', active);
-                setButtonDisabled(button, controlsDisabled);
+                button.title = unavailable ? 'Enable IPv6 in network settings, then return here' : '';
+                setButtonDisabled(button, controlsDisabled || unavailable);
             });
 
             if (saveButton) {
                 saveButton.textContent = status && status.active ? 'Save & Restart' : 'Save';
-                setButtonDisabled(saveButton, controlsDisabled || !dirty);
+                setButtonDisabled(saveButton, controlsDisabled || !dirty || selectedAutoUnavailable);
             }
+        }
+
+        function showNetworkModeCheckingHint() {
+            if (!currentStatus || currentStatus.ipv6_available !== false) return;
+
+            const dirtyNote = document.getElementById('networkModeDirtyNote');
+            if (!dirtyNote) return;
+
+            dirtyNote.textContent = 'Checking IPv6 availability...';
+            dirtyNote.classList.add('warning');
+        }
+
+        function refreshStatusAfterReturn() {
+            if (isLoading) return;
+            showNetworkModeCheckingHint();
+            refreshStatus(true);
         }
 
         function getPrivateDnsDefaultHostname(status = currentStatus) {
@@ -1217,6 +1239,10 @@
 
         async function setNetworkMode(mode) {
             if (isLoading || !currentStatus) return;
+            if (mode === 'auto' && currentStatus.ipv6_available === false && currentStatus.network_mode !== 'auto') {
+                showToast('Auto mode requires active IPv6 connectivity');
+                return;
+            }
 
             if (currentStatus.network_mode === mode) {
                 networkModeDraft = '';
@@ -1231,6 +1257,11 @@
             if (isLoading || !currentStatus || !isNetworkModeDirty(currentStatus)) return;
 
             const selectedMode = getSelectedNetworkMode(currentStatus);
+            if (selectedMode === 'auto' && currentStatus.ipv6_available === false) {
+                showToast('Auto mode requires active IPv6 connectivity');
+                return;
+            }
+
             const shouldRestart = Boolean(currentStatus.active);
             const loadingText = shouldRestart
                 ? 'Saving network mode and restarting nzapret...'
@@ -1486,7 +1517,7 @@
         // --- Visibility and resize ---
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) {
-                refreshStatus();
+                refreshStatusAfterReturn();
                 if (activePage === 'tools') {
                     loadUserList(true);
                 }
@@ -1501,6 +1532,7 @@
             syncLogPolling();
         });
 
+        window.addEventListener('focus', refreshStatusAfterReturn);
         window.addEventListener('resize', updateLogPanelHeight);
         if (window.visualViewport) {
             window.visualViewport.addEventListener('resize', updateLogPanelHeight);
