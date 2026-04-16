@@ -32,7 +32,7 @@ jobs:
           ZIP_NAME="nzapret-${VERSION}.zip"
           REPO_URL="https://github.com/${GITHUB_REPOSITORY}"
           RELEASE_NOTES_FILE=".github/release-notes/${VERSION}.md"
-          CHANGELOG_URL="$REPO_URL/blob/main/$RELEASE_NOTES_FILE"
+          CHANGELOG_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/refs/heads/main/$RELEASE_NOTES_FILE"
 
           if [ ! -f "$RELEASE_NOTES_FILE" ]; then
             echo "::error::Missing release notes file: $RELEASE_NOTES_FILE"
