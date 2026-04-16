@@ -20,9 +20,12 @@ PAYLOAD_TLS_FILE="$PAYLOADS/tls_clienthello_www_google_com.bin"
 BIN="$MODDIR/bin/nfqws2"
 PROFILE_DIR="$MODDIR/profiles"
 ACTIVE_PROFILE_FILE="$PROFILE_DIR/profile.current"
+NETWORK_MODE_FILE="$PROFILE_DIR/network.mode"
 DEFAULT_PROFILE="default"
 PROCESS_NAME="nfqws2"
 START_MODE="${1:-boot}"
+NETWORK_MODE=""
+IPV6_ENABLED=0
 
 # Utilities
 log_event() {
@@ -54,10 +57,89 @@ require_file() {
 ensure_runtime_layout() {
     mkdir -p "$PROFILE_DIR" "$LISTS" || fail "mkdir -p failed"
     ensure_user_list_file
+    ensure_network_mode_file
 }
 
 ensure_user_list_file() {
     [ -f "$USER_LIST_FILE" ] || : > "$USER_LIST_FILE" || fail "cannot create $USER_LIST_FILE"
+}
+
+normalize_network_mode() {
+    case "$1" in
+        ""|"auto") echo "auto" ;;
+        "ipv4-only") echo "ipv4-only" ;;
+        *) echo "" ;;
+    esac
+}
+
+detect_default_network_mode() {
+    if has_cmd ip; then
+        if ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 '; then
+            if ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1; then
+                echo "auto"
+                return
+            fi
+        fi
+
+        if ip route get 1.1.1.1 >/dev/null 2>&1; then
+            echo "ipv4-only"
+            return
+        fi
+    fi
+
+    if ip6tables_supported; then
+        echo "auto"
+    else
+        echo "ipv4-only"
+    fi
+}
+
+get_network_mode() {
+    if [ -f "$NETWORK_MODE_FILE" ]; then
+        _mode=$(head -n 1 "$NETWORK_MODE_FILE" 2>/dev/null | tr -d '\r\n')
+        _mode=$(normalize_network_mode "$_mode")
+        [ -n "$_mode" ] || _mode=$(detect_default_network_mode)
+        echo "$_mode"
+        return
+    fi
+    detect_default_network_mode
+}
+
+ensure_network_mode_file() {
+    _mode=$(get_network_mode)
+    if [ ! -f "$NETWORK_MODE_FILE" ]; then
+        printf '%s\n' "$_mode" > "$NETWORK_MODE_FILE" || fail "cannot create $NETWORK_MODE_FILE"
+        return
+    fi
+
+    _raw_mode=$(head -n 1 "$NETWORK_MODE_FILE" 2>/dev/null | tr -d '\r\n')
+    if [ "$_raw_mode" != "$_mode" ]; then
+        printf '%s\n' "$_mode" > "$NETWORK_MODE_FILE" || fail "cannot normalize $NETWORK_MODE_FILE"
+    fi
+}
+
+ip6tables_supported() {
+    has_cmd ip6tables || return 1
+    ip6tables -w -t mangle -L >/dev/null 2>&1
+}
+
+resolve_network_mode() {
+    NETWORK_MODE=$(get_network_mode)
+    case "$NETWORK_MODE" in
+        "ipv4-only")
+            IPV6_ENABLED=0
+            log_event NETWORK "mode ipv4-only: IPv6 firewall disabled"
+            ;;
+        *)
+            if ip6tables_supported; then
+                IPV6_ENABLED=1
+                log_event NETWORK "mode auto: IPv4 + IPv6 firewall enabled"
+            else
+                IPV6_ENABLED=0
+                log_event NETWORK "mode auto: IPv6 unavailable, using IPv4-only firewall"
+            fi
+            ;;
+    esac
 }
 
 # Iptables helpers
@@ -91,10 +173,12 @@ cleanup_tables() {
     $IPT -t mangle -F "$CHAIN" >/dev/null 2>&1
     $IPT -t mangle -X "$CHAIN" >/dev/null 2>&1
 
-    remove_jump_rules "$IP6T" OUTPUT
-    remove_jump_rules "$IP6T" FORWARD
-    $IP6T -t mangle -F "$CHAIN" >/dev/null 2>&1
-    $IP6T -t mangle -X "$CHAIN" >/dev/null 2>&1
+    if has_cmd ip6tables; then
+        remove_jump_rules "$IP6T" OUTPUT
+        remove_jump_rules "$IP6T" FORWARD
+        $IP6T -t mangle -F "$CHAIN" >/dev/null 2>&1
+        $IP6T -t mangle -X "$CHAIN" >/dev/null 2>&1
+    fi
 }
 
 # Profiles
@@ -169,6 +253,11 @@ start_nfqws2_from_profile() {
         case "$_line" in
             ""|\#*|\;*) continue ;;
         esac
+        if [ "$IPV6_ENABLED" != "1" ]; then
+            case "$_line" in
+                --bind-fix6) continue ;;
+            esac
+        fi
         set -- "$@" "$_line"
     done < "$_cfg"
 
@@ -268,21 +357,27 @@ verify_required_files() {
 apply_bypass_rules() {
     # Bypass nfqws2-generated fake packets to avoid loops and needless requeueing.
     ipt_run  -t mangle -A "$CHAIN" -m mark --mark 0x40000000/0x40000000 -j RETURN
-    ip6t_run -t mangle -A "$CHAIN" -m mark --mark 0x40000000/0x40000000 -j RETURN
+    if [ "$IPV6_ENABLED" = "1" ]; then
+        ip6t_run -t mangle -A "$CHAIN" -m mark --mark 0x40000000/0x40000000 -j RETURN
+    fi
 
     # Skip loopback and common VPN/tunnel interfaces.
     # Only -o is used because this chain is attached to OUTPUT and FORWARD.
     for _ifpat in lo tun+ wg+ tap+; do
         ipt_run  -t mangle -A "$CHAIN" -o "$_ifpat" -j RETURN
-        ip6t_run -t mangle -A "$CHAIN" -o "$_ifpat" -j RETURN
+        if [ "$IPV6_ENABLED" = "1" ]; then
+            ip6t_run -t mangle -A "$CHAIN" -o "$_ifpat" -j RETURN
+        fi
     done
 }
 
 verify_jump_rules() {
     check_jump_rule "$IPT" OUTPUT || fail "iptables OUTPUT jump missing after apply"
     check_jump_rule "$IPT" FORWARD || fail "iptables FORWARD jump missing after apply"
-    check_jump_rule "$IP6T" OUTPUT || fail "ip6tables OUTPUT jump missing after apply"
-    check_jump_rule "$IP6T" FORWARD || fail "ip6tables FORWARD jump missing after apply"
+    if [ "$IPV6_ENABLED" = "1" ]; then
+        check_jump_rule "$IP6T" OUTPUT || fail "ip6tables OUTPUT jump missing after apply"
+        check_jump_rule "$IP6T" FORWARD || fail "ip6tables FORWARD jump missing after apply"
+    fi
 }
 
 rotate_runtime_log
@@ -294,9 +389,9 @@ wait_for_boot_completion
 
 # Check dependencies
 require_cmd iptables
-require_cmd ip6tables
 require_cmd killall
 ensure_runtime_layout
+resolve_network_mode
 
 # Prepare binaries
 require_file "$BIN"
@@ -317,17 +412,21 @@ cleanup_tables
 ipt_run -t mangle -N "$CHAIN"
 ipt_run -t mangle -I OUTPUT -j "$CHAIN"
 ipt_run -t mangle -I FORWARD -j "$CHAIN"
-ip6t_run -t mangle -N "$CHAIN"
-ip6t_run -t mangle -I OUTPUT -j "$CHAIN"
-ip6t_run -t mangle -I FORWARD -j "$CHAIN"
+if [ "$IPV6_ENABLED" = "1" ]; then
+    ip6t_run -t mangle -N "$CHAIN"
+    ip6t_run -t mangle -I OUTPUT -j "$CHAIN"
+    ip6t_run -t mangle -I FORWARD -j "$CHAIN"
+fi
 
 apply_bypass_rules
 
-# NFQUEUE rules (same ports for IPv4 and IPv6)
+# NFQUEUE rules
 add_nfqueue_rule "$IPT"  tcp "$TCP_PORTS"
-add_nfqueue_rule "$IP6T" tcp "$TCP_PORTS"
 add_nfqueue_rule "$IPT"  udp "$UDP_PORTS"
-add_nfqueue_rule "$IP6T" udp "$UDP_PORTS"
+if [ "$IPV6_ENABLED" = "1" ]; then
+    add_nfqueue_rule "$IP6T" tcp "$TCP_PORTS"
+    add_nfqueue_rule "$IP6T" udp "$UDP_PORTS"
+fi
 
 verify_jump_rules
 

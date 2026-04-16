@@ -19,10 +19,11 @@ LOGFILE="$MODDIR/nzapret.log"
 EVENTLOG="$MODDIR/nzapret-events.log"
 PROFILE_DIR="$MODDIR/profiles"
 ACTIVE_PROFILE_FILE="$PROFILE_DIR/profile.current"
+NETWORK_MODE_FILE="$PROFILE_DIR/network.mode"
 DEFAULT_PROFILE="default"
 PROCESS_NAME="nfqws2"
 LIST_COUNT_CACHE="$MODDIR/.list_count"
-DIAGNOSE_COMMANDS="iptables ip6tables pgrep tail curl ip"
+DIAGNOSE_COMMANDS="iptables pgrep tail curl ip"
 DEFAULT_LIST_SOURCE="https://raw.githubusercontent.com/bol-van/rulist/refs/heads/main/reestr_hostname.txt"
 
 # Helpers
@@ -47,6 +48,106 @@ require_cmd() {
         echo "[-] Missing command: $1"
         exit 1
     }
+}
+
+normalize_network_mode() {
+    case "$1" in
+        ""|"auto") echo "auto" ;;
+        "ipv4-only") echo "ipv4-only" ;;
+        *) echo "" ;;
+    esac
+}
+
+detect_default_network_mode() {
+    if has_cmd ip; then
+        if ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 '; then
+            if ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1; then
+                echo "auto"
+                return
+            fi
+        fi
+
+        if ip route get 1.1.1.1 >/dev/null 2>&1; then
+            echo "ipv4-only"
+            return
+        fi
+    fi
+
+    if ip6tables_supported; then
+        echo "auto"
+    else
+        echo "ipv4-only"
+    fi
+}
+
+get_configured_network_mode() {
+    if [ -f "$NETWORK_MODE_FILE" ]; then
+        _mode=$(head -n 1 "$NETWORK_MODE_FILE" 2>/dev/null | tr -d '\r\n')
+        _mode=$(normalize_network_mode "$_mode")
+        [ -n "$_mode" ] || _mode=$(detect_default_network_mode)
+        echo "$_mode"
+        return
+    fi
+    detect_default_network_mode
+}
+
+ensure_network_mode_file() {
+    _mode=$(get_configured_network_mode)
+    if [ ! -f "$NETWORK_MODE_FILE" ]; then
+        printf '%s\n' "$_mode" > "$NETWORK_MODE_FILE" 2>/dev/null
+        return
+    fi
+
+    _raw_mode=$(head -n 1 "$NETWORK_MODE_FILE" 2>/dev/null | tr -d '\r\n')
+    if [ "$_raw_mode" != "$_mode" ]; then
+        printf '%s\n' "$_mode" > "$NETWORK_MODE_FILE" 2>/dev/null
+    fi
+}
+
+set_configured_network_mode() {
+    _mode=$(normalize_network_mode "$1")
+    [ -n "$_mode" ] || {
+        echo "[-] Unknown network mode: $1"
+        echo "Usage: nzapret network set <auto|ipv4-only>"
+        exit 1
+    }
+    printf '%s\n' "$_mode" > "$NETWORK_MODE_FILE" || {
+        echo "[-] Failed to save network mode"
+        exit 1
+    }
+}
+
+get_network_mode_label() {
+    case "$1" in
+        "ipv4-only") echo "IPv4 only" ;;
+        *) echo "Auto" ;;
+    esac
+}
+
+ip6tables_supported() {
+    has_cmd ip6tables || return 1
+    ip6tables -w -t mangle -L >/dev/null 2>&1
+}
+
+ipv6_firewall_enabled() {
+    [ "$(get_configured_network_mode)" = "ipv4-only" ] && return 1
+    ip6tables_supported
+}
+
+get_runtime_network_mode_label() {
+    _mode=$(get_configured_network_mode)
+    case "$_mode" in
+        "ipv4-only")
+            echo "IPv4 only"
+            ;;
+        *)
+            if ip6tables_supported; then
+                echo "Auto (IPv4 + IPv6)"
+            else
+                echo "Auto (IPv4 only fallback)"
+            fi
+            ;;
+    esac
 }
 
 json_escape() {
@@ -368,6 +469,10 @@ print_profile_status() {
     echo "Active profile: $_pname ($(get_profile_label "$_pname"))"
 }
 
+print_network_mode_status() {
+    echo "Network mode: $(get_runtime_network_mode_label)"
+}
+
 print_status_human() {
     _ver=$(get_version)
     _pid=$(get_first_pid)
@@ -388,6 +493,7 @@ print_status_human() {
     fi
 
     echo "iptables rules: $_rules (IPv4), $_rules6 (IPv6)"
+    print_network_mode_status
     print_profile_status
     echo ""
 
@@ -428,14 +534,21 @@ print_status_json() {
     _user_lc=$(get_user_list_count)
     _prof_name=$(get_active_profile)
     _prof_label=$(get_profile_label "$_prof_name")
+    _network_mode=$(get_configured_network_mode)
+    _network_mode_label=$(get_runtime_network_mode_label)
     if active_profile_uses_user_list; then
         _user_attached=true
     else
         _user_attached=false
     fi
+    if ipv6_firewall_enabled; then
+        _ipv6_enabled=true
+    else
+        _ipv6_enabled=false
+    fi
 
-    printf '{"version":"%s","active":%s,"pid":"%s","pid_count":%s,"rules_v4":%s,"rules_v6":%s,"domain_count":%s,"google_domain_count":%s,"user_domain_count":%s,"user_list_attached":%s,"profile":"%s","profile_label":"%s"}\n' \
-        "$(json_escape "$_ver")" "$_active" "$(json_escape "$_pid")" "$_pid_count" "$_rules" "$_rules6" "$_lc" "$_google_lc" "$_user_lc" "$_user_attached" "$(json_escape "$_prof_name")" "$(json_escape "$_prof_label")"
+    printf '{"version":"%s","active":%s,"pid":"%s","pid_count":%s,"rules_v4":%s,"rules_v6":%s,"domain_count":%s,"google_domain_count":%s,"user_domain_count":%s,"user_list_attached":%s,"profile":"%s","profile_label":"%s","network_mode":"%s","network_mode_label":"%s","ipv6_enabled":%s}\n' \
+        "$(json_escape "$_ver")" "$_active" "$(json_escape "$_pid")" "$_pid_count" "$_rules" "$_rules6" "$_lc" "$_google_lc" "$_user_lc" "$_user_attached" "$(json_escape "$_prof_name")" "$(json_escape "$_prof_label")" "$(json_escape "$_network_mode")" "$(json_escape "$_network_mode_label")" "$_ipv6_enabled"
 }
 
 get_rule_count() {
@@ -467,14 +580,16 @@ cleanup_jump_rules_local() {
     iptables -w -t mangle -F "$CHAIN" >/dev/null 2>&1
     iptables -w -t mangle -X "$CHAIN" >/dev/null 2>&1
 
-    while check_jump_rule ip6tables OUTPUT; do
-        ip6tables -w -t mangle -D OUTPUT -j "$CHAIN" >/dev/null 2>&1 || break
-    done
-    while check_jump_rule ip6tables FORWARD; do
-        ip6tables -w -t mangle -D FORWARD -j "$CHAIN" >/dev/null 2>&1 || break
-    done
-    ip6tables -w -t mangle -F "$CHAIN" >/dev/null 2>&1
-    ip6tables -w -t mangle -X "$CHAIN" >/dev/null 2>&1
+    if has_cmd ip6tables; then
+        while check_jump_rule ip6tables OUTPUT; do
+            ip6tables -w -t mangle -D OUTPUT -j "$CHAIN" >/dev/null 2>&1 || break
+        done
+        while check_jump_rule ip6tables FORWARD; do
+            ip6tables -w -t mangle -D FORWARD -j "$CHAIN" >/dev/null 2>&1 || break
+        done
+        ip6tables -w -t mangle -F "$CHAIN" >/dev/null 2>&1
+        ip6tables -w -t mangle -X "$CHAIN" >/dev/null 2>&1
+    fi
 }
 
 wait_for_process_exit() {
@@ -575,6 +690,7 @@ refresh_hostlists_if_running() {
 run_diagnose() {
     echo "nzapret diagnostics"
     echo "--------------------"
+    _network_mode=$(get_configured_network_mode)
 
     for _cmd in $DIAGNOSE_COMMANDS; do
         if has_cmd "$_cmd"; then
@@ -583,6 +699,18 @@ run_diagnose() {
             print_human_check fail "missing command: $_cmd"
         fi
     done
+
+    if [ "$_network_mode" = "ipv4-only" ]; then
+        print_human_check ok "ip6tables not required in IPv4-only mode"
+    elif has_cmd ip6tables; then
+        if ip6tables_supported; then
+            print_human_check ok "command available: ip6tables"
+        else
+            print_human_check fail "ip6tables present but unusable"
+        fi
+    else
+        print_human_check ok "ip6tables missing, auto mode will use IPv4-only fallback"
+    fi
 
     for _file in $(list_required_runtime_files); do
         if [ -f "$_file" ]; then
@@ -605,6 +733,8 @@ run_diagnose() {
         print_human_check fail "active profile does not reference list-user.txt"
     fi
 
+    print_human_check ok "$(print_network_mode_status)"
+
     for _hook in OUTPUT FORWARD; do
         if check_jump_rule iptables "$_hook"; then
             print_human_check ok "iptables $_hook jump present"
@@ -612,10 +742,14 @@ run_diagnose() {
             print_human_check fail "iptables $_hook jump missing"
         fi
 
-        if check_jump_rule ip6tables "$_hook"; then
-            print_human_check ok "ip6tables $_hook jump present"
+        if ipv6_firewall_enabled; then
+            if check_jump_rule ip6tables "$_hook"; then
+                print_human_check ok "ip6tables $_hook jump present"
+            else
+                print_human_check fail "ip6tables $_hook jump missing"
+            fi
         else
-            print_human_check fail "ip6tables $_hook jump missing"
+            print_human_check ok "ip6tables $_hook skipped (IPv4-only path)"
         fi
     done
 
@@ -626,7 +760,9 @@ run_diagnose() {
             print_human_check fail "IPv4 route lookup failed"
         fi
 
-        if ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 '; then
+        if [ "$_network_mode" = "ipv4-only" ]; then
+            print_human_check ok "IPv6 route lookup disabled by mode"
+        elif ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 '; then
             if ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1; then
                 print_human_check ok "IPv6 route lookup works"
             else
@@ -645,6 +781,7 @@ run_diagnose_json() {
     _ok=0
     _fail=0
     _sep=""
+    _network_mode=$(get_configured_network_mode)
 
     for _cmd in $DIAGNOSE_COMMANDS; do
         if has_cmd "$_cmd"; then
@@ -653,6 +790,18 @@ run_diagnose_json() {
             append_json_check "$_cmd" "fail" "command missing"
         fi
     done
+
+    if [ "$_network_mode" = "ipv4-only" ]; then
+        append_json_check "ip6tables" "ok" "not required in IPv4-only mode"
+    elif has_cmd ip6tables; then
+        if ip6tables_supported; then
+            append_json_check "ip6tables" "ok" "command available"
+        else
+            append_json_check "ip6tables" "fail" "present but unusable"
+        fi
+    else
+        append_json_check "ip6tables" "ok" "missing, auto mode will use IPv4-only fallback"
+    fi
 
     for _file in $(list_required_runtime_files); do
         _fname=$(basename "$_file")
@@ -676,16 +825,22 @@ run_diagnose_json() {
         append_json_check "list-user binding" "fail" "active profile does not reference list-user.txt"
     fi
 
+    append_json_check "network mode" "ok" "$(get_runtime_network_mode_label)"
+
     for _hook in OUTPUT FORWARD; do
         if check_jump_rule iptables "$_hook"; then
             append_json_check "iptables $_hook" "ok" "jump present"
         else
             append_json_check "iptables $_hook" "fail" "jump missing"
         fi
-        if check_jump_rule ip6tables "$_hook"; then
-            append_json_check "ip6tables $_hook" "ok" "jump present"
+        if ipv6_firewall_enabled; then
+            if check_jump_rule ip6tables "$_hook"; then
+                append_json_check "ip6tables $_hook" "ok" "jump present"
+            else
+                append_json_check "ip6tables $_hook" "fail" "jump missing"
+            fi
         else
-            append_json_check "ip6tables $_hook" "fail" "jump missing"
+            append_json_check "ip6tables $_hook" "ok" "skipped (IPv4-only path)"
         fi
     done
 
@@ -695,7 +850,9 @@ run_diagnose_json() {
         else
             append_json_check "IPv4 routing" "fail" "route lookup failed"
         fi
-        if ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 '; then
+        if [ "$_network_mode" = "ipv4-only" ]; then
+            append_json_check "IPv6 routing" "ok" "disabled by mode"
+        elif ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 '; then
             if ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1; then
                 append_json_check "IPv6 routing" "ok" "route lookup works"
             else
@@ -874,6 +1031,29 @@ case "$1" in
         esac
         ;;
 
+    "network")
+        case "$2" in
+            ""|"status")
+                echo "Configured mode: $(get_network_mode_label "$(get_configured_network_mode)")"
+                echo "Effective stack: $(get_runtime_network_mode_label)"
+                ;;
+            "set")
+                [ -n "$3" ] || {
+                    echo "Usage: nzapret network set <auto|ipv4-only>"
+                    exit 1
+                }
+                set_configured_network_mode "$3"
+                log_event NETWORK "mode set to $(get_configured_network_mode)"
+                echo "[+] Network mode set to: $(get_network_mode_label "$(get_configured_network_mode)")"
+                echo "[*] Restart nzapret to apply changes"
+                ;;
+            *)
+                echo "Usage: nzapret network [status|set <auto|ipv4-only>]"
+                exit 1
+                ;;
+        esac
+        ;;
+
     "list-user")
         case "$2" in
             ""|"status")
@@ -1006,12 +1186,14 @@ case "$1" in
         echo "  events clear                - clear the whole event log file"
         echo "  events --json [--tail=N]    - event history as JSON"
         echo "  profile <subcommand>        - show, list or switch nfqws2 profiles"
+        echo "  network <subcommand>        - configure auto or IPv4-only firewall mode"
         echo "  list-user <subcommand>      - manage the personal domain hostlist"
         echo "  diagnose                    - run Android-side diagnostics"
         echo "  diagnose --json             - diagnostics as JSON for WebUI"
         echo "  help                        - show this help message"
         echo ""
         echo "Profile commands: status, list, set <name>"
+        echo "Network commands: status, set <auto|ipv4-only>"
         echo "User list commands: status, show, add, remove, replace, clear"
         ;;
 esac

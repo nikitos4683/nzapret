@@ -46,10 +46,12 @@ cleanup_tables() {
     $IPT -t mangle -F "$CHAIN" >/dev/null 2>&1
     $IPT -t mangle -X "$CHAIN" >/dev/null 2>&1
 
-    remove_jump_rules "$IP6T" OUTPUT
-    remove_jump_rules "$IP6T" FORWARD
-    $IP6T -t mangle -F "$CHAIN" >/dev/null 2>&1
-    $IP6T -t mangle -X "$CHAIN" >/dev/null 2>&1
+    if has_cmd ip6tables; then
+        remove_jump_rules "$IP6T" OUTPUT
+        remove_jump_rules "$IP6T" FORWARD
+        $IP6T -t mangle -F "$CHAIN" >/dev/null 2>&1
+        $IP6T -t mangle -X "$CHAIN" >/dev/null 2>&1
+    fi
 }
 
 write_stop_event() {
@@ -62,7 +64,6 @@ killall "$PROCESS_NAME" 2>/dev/null
 
 # Dependencies check
 require_cmd iptables
-require_cmd ip6tables
 
 cleanup_tables
 log "service uninstalled"

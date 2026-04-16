@@ -51,6 +51,10 @@
                         <span class="status-item-value" id="profileName">--</span>
                     </div>
                     <div class="status-item">
+                        <span class="status-item-label">Network Mode</span>
+                        <span class="status-item-value" id="networkModeLabel">--</span>
+                    </div>
+                    <div class="status-item">
                         <span class="status-item-label">Domains</span>
                         <span class="status-item-value" id="domainCount">0</span>
                     </div>
@@ -153,6 +157,32 @@
 
                 <div class="tools-support-line">
                     Profile changes are saved immediately and applied after restart.
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="panel-head">
+                    <div>
+                        <div class="panel-title">Network Stack</div>
+                        <div class="panel-subtitle">Choose whether nzapret should keep IPv6 interception enabled or stay in a dedicated IPv4-only mode. Changes apply after restart.</div>
+                    </div>
+                </div>
+
+                <div class="profile-slider-container">
+                    <div class="profile-slider network-mode-grid" id="networkModeSlider">
+                        <button class="profile-item network-mode-item" type="button" data-network-mode="auto" onclick="setNetworkMode('auto')">
+                            <span class="profile-item-label">Auto</span>
+                            <span class="profile-item-meta">Use IPv4 and keep IPv6 ready when supported.</span>
+                        </button>
+                        <button class="profile-item network-mode-item" type="button" data-network-mode="ipv4-only" onclick="setNetworkMode('ipv4-only')">
+                            <span class="profile-item-label">IPv4 Only</span>
+                            <span class="profile-item-meta">Skip ip6tables rules and IPv6 bind-fix on restart.</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="tools-support-line" id="networkModeNote">
+                    Network mode status will appear here after the first refresh.
                 </div>
             </div>
 
@@ -317,6 +347,48 @@
             if (!button) return;
             button.disabled = disabled;
             button.classList.toggle('disabled', disabled);
+        }
+
+        function getNetworkModeNote(status = currentStatus) {
+            if (!status || !status.network_mode) {
+                return 'Network mode status will appear here after the first refresh.';
+            }
+
+            const rulesV6 = parseInt(status.rules_v6 ?? 0, 10);
+            if (status.network_mode === 'ipv4-only') {
+                if (status.active && rulesV6 > 0) {
+                    return 'IPv4-only mode is saved. Restart nzapret to remove the current IPv6 rules.';
+                }
+                return 'IPv4-only mode will keep only IPv4 firewall rules and skip bind-fix6 after restart.';
+            }
+
+            if (status.ipv6_enabled === false) {
+                return 'Auto mode is active, but this device currently falls back to IPv4 because IPv6 firewall support is unavailable.';
+            }
+
+            return 'Auto mode keeps IPv4 and IPv6 interception available when the device firewall supports both.';
+        }
+
+        function updateNetworkModeUi(status = currentStatus) {
+            const label = document.getElementById('networkModeLabel');
+            const note = document.getElementById('networkModeNote');
+            const buttons = document.querySelectorAll('[data-network-mode]');
+            const mode = status && status.network_mode ? status.network_mode : '';
+
+            if (label) {
+                label.textContent = status && status.network_mode_label ? status.network_mode_label : '--';
+            }
+
+            if (note) {
+                note.textContent = getNetworkModeNote(status);
+                note.classList.toggle('warning', Boolean(status && status.network_mode === 'ipv4-only'));
+            }
+
+            buttons.forEach((button) => {
+                const active = mode && button.dataset.networkMode === mode;
+                button.classList.toggle('active', active);
+                setButtonDisabled(button, isLoading);
+            });
         }
 
         function renderUserListPane() {
@@ -776,6 +848,7 @@
         // --- Action buttons ---
         function updateActionButtons(isOn) {
             if (isLoading) {
+                updateNetworkModeUi();
                 updateUserListEditorState();
                 return;
             }
@@ -783,6 +856,7 @@
             document.getElementById('btnStop').classList.toggle('disabled', !isOn);
             document.getElementById('btnRestart').classList.toggle('disabled', !isOn);
             document.getElementById('btnUpdate').classList.remove('disabled');
+            updateNetworkModeUi();
             updateUserListEditorState();
         }
 
@@ -790,6 +864,7 @@
             currentStatus = null;
             document.getElementById('pidBadge').textContent = 'PID --';
             document.getElementById('profileName').textContent = '--';
+            document.getElementById('networkModeLabel').textContent = '--';
             document.getElementById('rulesV4').textContent = '?';
             document.getElementById('rulesV6').textContent = '?';
             document.getElementById('domainCount').textContent = '?';
@@ -808,6 +883,7 @@
             if (!isLoading) {
                 updateActionButtons(false);
             }
+            updateNetworkModeUi(null);
             updateUserListEditorState();
         }
 
@@ -929,6 +1005,7 @@
                 document.getElementById('googleDomainCount').textContent = fmt(status.google_domain_count ?? 0);
                 document.getElementById('userDomainCount').textContent = fmt(status.user_domain_count ?? 0);
                 updateProfileSlider(status.profile);
+                updateNetworkModeUi(status);
                 updateUserListEditorState();
 
                 const card = document.getElementById('statusCard');
@@ -1035,8 +1112,21 @@
             });
             if (result.ok) {
                 showToast('Restart nzapret to apply changes');
-                const items = document.querySelectorAll('.profile-item');
+                const items = document.querySelectorAll('#profileSlider .profile-item');
                 items.forEach(i => i.classList.toggle('active', i.dataset.profile === name));
+            }
+        }
+
+        async function setNetworkMode(mode) {
+            if (isLoading || (currentStatus && currentStatus.network_mode === mode)) return;
+
+            const result = await runCli(`network set ${shellQuote(mode)}`, {
+                loadingText: 'Saving network mode...',
+                successText: 'Network mode set'
+            });
+            if (result.ok) {
+                showToast('Restart nzapret to apply changes');
+                updateNetworkModeUi(currentStatus);
             }
         }
 
@@ -1202,6 +1292,7 @@
         window.doAction = doAction;
         window.setPage = setPage;
         window.setProfile = setProfile;
+        window.setNetworkMode = setNetworkMode;
         window.reloadUserList = reloadUserList;
         window.addUserListDomain = addUserListDomain;
         window.saveUserList = saveUserList;
@@ -1215,6 +1306,7 @@
         // --- Init ---
         setupScrollTracking();
         setupUserListEditor();
+        updateNetworkModeUi();
         startStatusPolling();
         renderPages();
         renderLogView();
