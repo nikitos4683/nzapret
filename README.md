@@ -104,12 +104,12 @@ nzapret update         # Скачать и обновить списки обх�
 nzapret profile list   # Показать доступные профили конфигурации
 nzapret profile set <name> # Переключить активный профиль
 nzapret network status      # Посмотреть текущий режим стека (auto / IPv4-only)
-nzapret network set ipv4-only
-nzapret network set auto
+nzapret network set ipv4-only # Зафиксировать режим только для IPv4-сетей
+nzapret network set auto      # Вернуть автоматический выбор IPv4/IPv6
 nzapret list-user status    # Статус персонального списка и домены
 nzapret list-user show      # Показать текущее содержимое
-nzapret list-user add example.com youtube.com
-nzapret list-user remove example.com
+nzapret list-user add example.com youtube.com # Добавить домены в персональный список
+nzapret list-user remove example.com          # Удалить домен из персонального списка
 nzapret list-user replace example.com github.com # Перезаписать список
 nzapret list-user clear     # Полностью очистить список
 ```
