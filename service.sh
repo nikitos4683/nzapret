@@ -21,7 +21,9 @@ BIN="$MODDIR/bin/nfqws2"
 PROFILE_DIR="$MODDIR/profiles"
 ACTIVE_PROFILE_FILE="$PROFILE_DIR/profile.current"
 NETWORK_MODE_FILE="$PROFILE_DIR/network.mode"
+PRIVATE_DNS_INIT_FILE="$MODDIR/.private_dns_initialized"
 DEFAULT_PROFILE="default"
+DEFAULT_PRIVATE_DNS_HOSTNAME="xbox-dns.ru"
 PROCESS_NAME="nfqws2"
 START_MODE="${1:-boot}"
 NETWORK_MODE=""
@@ -36,6 +38,10 @@ log_event() {
 
 has_cmd() {
     command -v "$1" >/dev/null 2>&1
+}
+
+trim_setting_value() {
+    printf '%s' "$1" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
 }
 
 # Emergency exit: rolls back iptables and kills nfqws2 to prevent unstable state.
@@ -140,6 +146,112 @@ resolve_network_mode() {
             fi
             ;;
     esac
+}
+
+read_global_setting() {
+    has_cmd settings || return 1
+    _value=$(settings get global "$1" 2>/dev/null | tr -d '\r')
+    case "$_value" in
+        ""|"null") return 1 ;;
+    esac
+    printf '%s' "$_value"
+}
+
+put_global_setting() {
+    has_cmd settings || return 1
+    settings put global "$1" "$2" >/dev/null 2>&1
+}
+
+normalize_private_dns_mode() {
+    case "$1" in
+        ""|"opportunistic"|"auto") echo "opportunistic" ;;
+        "off") echo "off" ;;
+        "hostname"|"provider") echo "hostname" ;;
+        *) echo "" ;;
+    esac
+}
+
+normalize_private_dns_hostname() {
+    trim_setting_value "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+get_private_dns_mode() {
+    _mode=$(read_global_setting private_dns_mode 2>/dev/null || echo "")
+    if [ -z "$_mode" ]; then
+        _mode=$(read_global_setting private_dns_default_mode 2>/dev/null || echo "")
+    fi
+    _mode=$(normalize_private_dns_mode "$_mode")
+    [ -n "$_mode" ] || _mode="opportunistic"
+    echo "$_mode"
+}
+
+get_private_dns_hostname() {
+    _host=$(read_global_setting private_dns_specifier 2>/dev/null || echo "")
+    normalize_private_dns_hostname "$_host"
+}
+
+is_valid_private_dns_hostname() {
+    _host=$(normalize_private_dns_hostname "$1")
+    [ -n "$_host" ] || return 1
+    [ "${#_host}" -le 253 ] || return 1
+    case "$_host" in
+        .*|*..*|*.) return 1 ;;
+        *[!a-z0-9.-]*) return 1 ;;
+    esac
+
+    _old_ifs=$IFS
+    IFS='.'
+    set -- $_host
+    IFS=$_old_ifs
+
+    [ "$#" -ge 2 ] || return 1
+    for _label in "$@"; do
+        [ -n "$_label" ] || return 1
+        [ "${#_label}" -le 63 ] || return 1
+        case "$_label" in
+            -*|*-) return 1 ;;
+        esac
+    done
+    return 0
+}
+
+set_private_dns_hostname_mode() {
+    _host=$(normalize_private_dns_hostname "$1")
+    is_valid_private_dns_hostname "$_host" || return 1
+    put_global_setting private_dns_specifier "$_host" || return 1
+    _mode=$(get_private_dns_mode)
+    if [ "$_mode" != "hostname" ]; then
+        put_global_setting private_dns_mode hostname || return 1
+    fi
+    return 0
+}
+
+mark_private_dns_initialized() {
+    : > "$PRIVATE_DNS_INIT_FILE" 2>/dev/null
+}
+
+ensure_private_dns_initialized() {
+    has_cmd settings || {
+        log_event DNS "settings command unavailable, skipping Private DNS initialization"
+        return 0
+    }
+
+    [ -f "$PRIVATE_DNS_INIT_FILE" ] && return 0
+
+    _mode=$(get_private_dns_mode)
+    _host=$(get_private_dns_hostname)
+    if [ "$_mode" = "hostname" ] && is_valid_private_dns_hostname "$_host"; then
+        mark_private_dns_initialized
+        log_event DNS "existing Private DNS provider preserved ($_host)"
+        return 0
+    fi
+
+    if set_private_dns_hostname_mode "$DEFAULT_PRIVATE_DNS_HOSTNAME"; then
+        mark_private_dns_initialized
+        log_event DNS "default Private DNS provider set to $DEFAULT_PRIVATE_DNS_HOSTNAME"
+    else
+        log_event ERROR "failed to initialize Private DNS provider"
+    fi
 }
 
 # Iptables helpers
@@ -391,6 +503,7 @@ wait_for_boot_completion
 require_cmd iptables
 require_cmd killall
 ensure_runtime_layout
+ensure_private_dns_initialized
 resolve_network_mode
 
 # Prepare binaries

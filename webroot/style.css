@@ -90,7 +90,7 @@ body {
     /* Use KSU inset variables with safe fallbacks */
     padding: 20px 16px 32px;
     padding-top: calc(20px + var(--window-inset-top, 0px));
-    padding-bottom: calc(112px + var(--window-inset-bottom, 0px));
+    padding-bottom: calc(16px + var(--window-inset-bottom, 0px));
 }
 
 .container {
@@ -657,6 +657,21 @@ body.ui-busy .icon-btn {
     line-height: 1.4;
 }
 
+.private-dns-custom-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.private-dns-input {
+    min-width: 0;
+}
+
+.private-dns-apply-btn {
+    white-space: nowrap;
+}
+
 .tools-support-line {
     margin-top: 12px;
     font-size: 11px;
@@ -716,6 +731,12 @@ body.ui-busy .icon-btn {
     scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
 }
 
+.user-list-pane.empty {
+    min-height: 0;
+    padding: 10px 12px;
+    overflow: hidden;
+}
+
 .user-list-pane::-webkit-scrollbar {
     width: 4px;
 }
@@ -731,6 +752,17 @@ body.ui-busy .icon-btn {
 
 .user-list-empty {
     display: flex;
+    align-items: center;
+    min-height: 54px;
+    padding: 0;
+    text-align: left;
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1.5;
+    gap: 10px;
+}
+
+.user-list-pane:not(.empty) .user-list-empty {
     flex-direction: column;
     align-items: center;
     justify-content: center;
@@ -746,11 +778,19 @@ body.ui-busy .icon-btn {
 .user-list-empty::before {
     content: '';
     display: block;
+    width: 28px;
+    height: 28px;
+    border-radius: 9px;
+    background: var(--accent-soft);
+    border: 1px dashed var(--border);
+    flex-shrink: 0;
+}
+
+.user-list-pane:not(.empty) .user-list-empty::before {
     width: 36px;
     height: 36px;
     border-radius: 10px;
     background: var(--bg-input);
-    border: 1px dashed var(--border);
 }
 
 .user-list-item {
@@ -976,7 +1016,7 @@ body.ui-busy .icon-btn {
 .log-panels {
     position: relative;
     display: flex;
-    min-height: 240px;
+    min-height: 0;
 }
 
 .log-pane {
@@ -1052,17 +1092,27 @@ body.ui-busy .icon-btn {
     width: 7px;
     height: 7px;
     border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent-glow);
     flex-shrink: 0;
     margin-top: 5px;
 }
 
-.event-dot.start, .event-dot.nfqws2 { background: var(--green); box-shadow: 0 0 6px var(--green-glow); }
-.event-dot.stop, .event-dot.error  { background: var(--red); box-shadow: 0 0 6px var(--red-glow); }
-.event-dot.update, .event-dot.profile { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
-.event-dot.userlist { background: var(--green); box-shadow: 0 0 6px var(--green-glow); }
+.event-dot.start,
+.event-dot.nfqws2,
+.event-dot.userlist {
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green-glow);
+}
+
+.event-dot.stop,
+.event-dot.error {
+    background: var(--red);
+    box-shadow: 0 0 6px var(--red-glow);
+}
+
 .event-dot.userlist.saved { background: var(--green); box-shadow: 0 0 6px var(--green-glow); }
-.event-dot.userlist.pending { background: var(--orange); box-shadow: 0 0 6px rgba(255, 171, 64, 0.25); }
-.event-dot.iptables, .event-dot.info  { background: var(--text-tertiary); }
+.event-dot.userlist.pending { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
 
 .event-body {
     flex: 1;
@@ -1117,8 +1167,12 @@ body.ui-busy .icon-btn {
     margin-bottom: 0;
 }
 
-#pageTools > .card:last-child {
+#pageRuntime > .actions:last-child {
     margin-bottom: 0;
+}
+
+#pageTools {
+    padding-bottom: calc(88px + var(--window-inset-bottom, 0px));
 }
 
 .log-live-dot {
@@ -1429,6 +1483,10 @@ body.ui-busy .icon-btn {
     }
 
     .profile-slider {
+        grid-template-columns: 1fr;
+    }
+
+    .private-dns-custom-row {
         grid-template-columns: 1fr;
     }
 

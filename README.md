@@ -8,7 +8,7 @@
 ![Root](https://img.shields.io/badge/Root-Magisk%20%7C%20KernelSU-1f6feb?style=for-the-badge)
 ![Engine](https://img.shields.io/badge/Engine-nfqws2-f59e0b?style=for-the-badge)
 ![UI](https://img.shields.io/badge/UI-KernelSU%20WebUI-8b5cf6?style=for-the-badge)
-![Version](https://img.shields.io/badge/Version-v2.0.1-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-v2.1.0-blue?style=for-the-badge)
 
 </div>
 
@@ -25,6 +25,7 @@
 - **Легковесная стратегия "из коробки":** Базовый профиль рассчитан на мобильные сети и смартфоны и не требует дополнительной настройки для базового сценария.
 - **Умный роутинг:** Незаметный перехват трафика в цепочках `OUTPUT` и `FORWARD` для IPv4 и IPv6.
 - **Режим IPv4-only:** При необходимости модуль можно перевести в отдельный режим только для IPv4-сетей без задействования IPv6-цепочек.
+- **Управление Private DNS:** Модуль умеет инициализировать системный `Private DNS` значением `xbox-dns.ru` и позволяет переключать провайдера из WebUI и CLI. Это необходимо для корректного обхода блокировок ИИ-сервисов (ChatGPT, Claude, Gemini и др.), которые помимо DPI могут блокироваться на уровне DNS.
 - **Поддержка профилей:** Легкое переключение между разными конфигурациями обхода "на лету".
 - **Персональный `list-user`:** Собственный список доменов пользователя с редактированием из WebUI и CLI.
 - **Локальная автономность:** Служба не выходит в сеть при загрузке устройства и использует только локальные данные.
@@ -36,7 +37,7 @@
 ### 🚧 Ограничения и известные проблемы
 > **Telegram:** В настоящий момент модуль не осуществляет обход блокировок Telegram. Добавление поддержки Telegram (и соответствующих стратегий) запланировано на будущие релизы!
 >
-> **Баг WebUI в KernelSU (~~и KernelSU-Next~~):** ~~Из-за бага менеджера ksun (issue [#1180](https://github.com/KernelSU-Next/KernelSU-Next/issues/1180)),~~ процесс модуля `nfqws2`, запущенный *вручную* кнопкой Start из WebUI, может "умирать" (закрываться системой) после смахивания KernelSU из недавних приложений. **(В KernelSU-Next баг повержен! Наш фикс успешно смержен в апстрим 🚀 Но на обычном KernelSU проблема всё ещё остаётся).** Если вы сидите на оригинальном KSU (или старой версии KSU-Next) и столкнулись с этим, лучше всего запускать модуль встроенной кнопкой **Action** в самом менеджере модулей (она автоматически определяет статус и безопасно включает/выключает службу), либо через терминал командой `nzapret start`. При автостарте вместе с системой nzapret работает стабильно.
+> **Баг WebUI в KernelSU ~~(и KernelSU-Next)~~:** Из-за бага менеджера ~~ksun (issue [#1180](https://github.com/KernelSU-Next/KernelSU-Next/issues/1180)),~~ процесс модуля `nfqws2`, запущенный *вручную* кнопкой Start из WebUI, может "умирать" (закрываться системой) после смахивания KernelSU из недавних приложений. **(В KernelSU-Next баг повержен! Наш фикс успешно смержен в апстрим 🚀 Но на обычном KernelSU проблема всё ещё остаётся).** Если вы сидите на оригинальном KSU (или старой версии KSU-Next) и столкнулись с этим, лучше всего запускать модуль встроенной кнопкой **Action** в самом менеджере модулей (она автоматически определяет статус и безопасно включает/выключает службу), либо через терминал командой `nzapret start`. При автостарте вместе с системой nzapret работает стабильно.
 
 ---
 
@@ -106,6 +107,11 @@ nzapret profile set <name> # Переключить активный профи�
 nzapret network status      # Посмотреть текущий режим стека (auto / IPv4-only)
 nzapret network set ipv4-only # Зафиксировать режим только для IPv4-сетей
 nzapret network set auto      # Вернуть автоматический выбор IPv4/IPv6
+nzapret dns status          # Посмотреть текущее состояние Android Private DNS
+nzapret dns set default     # Применить дефолтный provider hostname: xbox-dns.ru
+nzapret dns set auto        # Вернуть системный автоматический Private DNS
+nzapret dns set off         # Полностью отключить системный Private DNS
+nzapret dns set hostname dns.example.com # Установить свой provider hostname
 nzapret list-user status    # Статус персонального списка и домены
 nzapret list-user show      # Показать текущее содержимое
 nzapret list-user add example.com youtube.com # Добавить домены в персональный список

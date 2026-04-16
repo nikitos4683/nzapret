@@ -46,13 +46,13 @@
                     <div class="status-badge" id="pidBadge">PID --</div>
                 </div>
                 <div class="status-grid">
-                    <div class="status-item status-item-wide">
-                        <span class="status-item-label">Routing Profile</span>
-                        <span class="status-item-value" id="profileName">--</span>
-                    </div>
                     <div class="status-item">
                         <span class="status-item-label">Network Mode</span>
                         <span class="status-item-value" id="networkModeLabel">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-item-label">Private DNS</span>
+                        <span class="status-item-value" id="privateDnsLabel">--</span>
                     </div>
                     <div class="status-item">
                         <span class="status-item-label">Domains</span>
@@ -126,8 +126,8 @@
                     <span class="user-list-note" id="userListProfileNote">Linked to current profile.</span>
                 </div>
 
-                <div class="user-list-pane" id="userListPane">
-                    <div class="user-list-empty">No domains in personal list.</div>
+                <div class="user-list-pane empty" id="userListPane">
+                    <div class="user-list-empty">No personal domains yet. Add one below to include it in the active hostlist.</div>
                 </div>
 
                 <div class="user-list-quick-add">
@@ -144,27 +144,8 @@
             <div class="card">
                 <div class="panel-head">
                     <div>
-                        <div class="panel-title">Routing Profile</div>
-                        <div class="panel-subtitle">Choose the active bypass strategy. Changes apply after restart.</div>
-                    </div>
-                </div>
-
-                <div class="profile-slider-container">
-                    <div class="profile-slider" id="profileSlider">
-                        <!-- Items injected by JS -->
-                    </div>
-                </div>
-
-                <div class="tools-support-line">
-                    Profile changes are saved immediately and applied after restart.
-                </div>
-            </div>
-
-            <div class="card">
-                <div class="panel-head">
-                    <div>
                         <div class="panel-title">Network Stack</div>
-                        <div class="panel-subtitle">Choose whether nzapret should keep IPv6 interception enabled or stay in a dedicated IPv4-only mode. Changes apply after restart.</div>
+                        <div class="panel-subtitle">Choose whether nzapret should keep IPv6 interception enabled or stay in a dedicated IPv4-only mode.</div>
                     </div>
                 </div>
 
@@ -181,8 +162,44 @@
                     </div>
                 </div>
 
-                <div class="tools-support-line" id="networkModeNote">
-                    Network mode status will appear here after the first refresh.
+                <div class="user-list-footer">
+                    <span class="user-list-footnote" id="networkModeDirtyNote">No unsaved changes.</span>
+                    <button class="icon-btn primary user-list-save-btn" id="btnSaveNetworkMode" type="button" onclick="saveNetworkMode()">Save</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="panel-head">
+                    <div>
+                        <div class="panel-title">Private DNS</div>
+                        <div class="panel-subtitle">Manage Android system Private DNS. nzapret will initialize <code>xbox-dns.ru</code> on the first service start unless the device already uses another provider hostname.</div>
+                    </div>
+                </div>
+
+                <div class="profile-slider-container">
+                    <div class="profile-slider network-mode-grid" id="privateDnsModeSlider">
+                        <button class="profile-item private-dns-item" type="button" data-private-dns-mode="off" onclick="setPrivateDnsMode('off')">
+                            <span class="profile-item-label">Off</span>
+                            <span class="profile-item-meta">Disable Private DNS for the Android system resolver.</span>
+                        </button>
+                        <button class="profile-item private-dns-item" type="button" data-private-dns-mode="auto" onclick="setPrivateDnsMode('auto')">
+                            <span class="profile-item-label">Automatic</span>
+                            <span class="profile-item-meta">Let Android use encrypted DNS when the active network supports it.</span>
+                        </button>
+                        <button class="profile-item private-dns-item" type="button" data-private-dns-mode="default" onclick="setPrivateDnsDefault()">
+                            <span class="profile-item-label">xbox-dns.ru</span>
+                            <span class="profile-item-meta">Apply the nzapret default provider hostname right away.</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="private-dns-custom-row">
+                    <input class="user-list-input private-dns-input" id="privateDnsHostnameInput" type="text" inputmode="url" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="dns.example.com">
+                    <button class="icon-btn primary private-dns-apply-btn" id="btnApplyPrivateDnsHostname" type="button" onclick="applyPrivateDnsHostname()">Apply Hostname</button>
+                </div>
+
+                <div class="tools-support-line" id="privateDnsNote">
+                    Private DNS status will appear here after the first refresh.
                 </div>
             </div>
 
@@ -284,7 +301,7 @@
         let activePage = 'runtime';
         let activeLogView = 'runtime';
         let currentStatus = null;
-        let profilesLoaded = false;
+        let networkModeDraft = '';
         let userListEntries = [];
         let userListLoaded = false;
         let userListRequestInFlight = false;
@@ -292,6 +309,7 @@
         let userScrolledUp = false;
         let diagnosticsData = null;
         let diagnosticsExpanded = false;
+        let privateDnsInputDirty = false;
         let toastTimer = null;
 
         function shellQuote(value) {
@@ -349,46 +367,151 @@
             button.classList.toggle('disabled', disabled);
         }
 
-        function getNetworkModeNote(status = currentStatus) {
-            if (!status || !status.network_mode) {
-                return 'Network mode status will appear here after the first refresh.';
+        function getSelectedNetworkMode(status = currentStatus) {
+            if (networkModeDraft) {
+                return networkModeDraft;
             }
+            return status && status.network_mode ? status.network_mode : '';
+        }
 
-            const rulesV6 = parseInt(status.rules_v6 ?? 0, 10);
-            if (status.network_mode === 'ipv4-only') {
-                if (status.active && rulesV6 > 0) {
-                    return 'IPv4-only mode is saved. Restart nzapret to remove the current IPv6 rules.';
-                }
-                return 'IPv4-only mode will keep only IPv4 firewall rules and skip bind-fix6 after restart.';
+        function isNetworkModeDirty(status = currentStatus) {
+            if (!status || !status.network_mode || !networkModeDraft) {
+                return false;
             }
-
-            if (status.ipv6_enabled === false) {
-                return 'Auto mode is active, but this device currently falls back to IPv4 because IPv6 firewall support is unavailable.';
-            }
-
-            return 'Auto mode keeps IPv4 and IPv6 interception available when the device firewall supports both.';
+            return networkModeDraft !== status.network_mode;
         }
 
         function updateNetworkModeUi(status = currentStatus) {
             const label = document.getElementById('networkModeLabel');
-            const note = document.getElementById('networkModeNote');
+            const dirtyNote = document.getElementById('networkModeDirtyNote');
+            const saveButton = document.getElementById('btnSaveNetworkMode');
             const buttons = document.querySelectorAll('[data-network-mode]');
-            const mode = status && status.network_mode ? status.network_mode : '';
+            const mode = getSelectedNetworkMode(status);
+            const dirty = isNetworkModeDirty(status);
+            const controlsDisabled = isLoading || !status;
 
             if (label) {
                 label.textContent = status && status.network_mode_label ? status.network_mode_label : '--';
             }
 
-            if (note) {
-                note.textContent = getNetworkModeNote(status);
-                note.classList.toggle('warning', Boolean(status && status.network_mode === 'ipv4-only'));
+            if (dirtyNote) {
+                if (!status) {
+                    dirtyNote.textContent = 'No unsaved changes.';
+                } else {
+                    dirtyNote.textContent = dirty ? 'Unsaved changes.' : 'No unsaved changes.';
+                }
+                dirtyNote.classList.toggle('warning', dirty);
             }
 
             buttons.forEach((button) => {
                 const active = mode && button.dataset.networkMode === mode;
                 button.classList.toggle('active', active);
-                setButtonDisabled(button, isLoading);
+                setButtonDisabled(button, controlsDisabled);
             });
+
+            if (saveButton) {
+                saveButton.textContent = status && status.active ? 'Save & Restart' : 'Save';
+                setButtonDisabled(saveButton, controlsDisabled || !dirty);
+            }
+        }
+
+        function getPrivateDnsDefaultHostname(status = currentStatus) {
+            return status && status.private_dns_default_hostname
+                ? status.private_dns_default_hostname
+                : 'xbox-dns.ru';
+        }
+
+        function isValidPrivateDnsHostname(value) {
+            const host = String(value || '').trim().toLowerCase();
+            if (!host || host.length > 253) return false;
+            if (host.startsWith('.') || host.endsWith('.') || host.includes('..')) return false;
+            if (!/^[a-z0-9.-]+$/.test(host)) return false;
+
+            const labels = host.split('.');
+            if (labels.length < 2) return false;
+            return labels.every(label =>
+                label.length > 0
+                && label.length <= 63
+                && !label.startsWith('-')
+                && !label.endsWith('-')
+            );
+        }
+
+        function getPrivateDnsNote(status = currentStatus) {
+            if (!status) {
+                return 'Private DNS status will appear here after the first refresh.';
+            }
+
+            if (status.private_dns_available === false) {
+                return 'Private DNS controls are unavailable because the Android settings command is missing on this build.';
+            }
+
+            const defaultHost = getPrivateDnsDefaultHostname(status);
+            if (status.private_dns_initialized === false) {
+                return `nzapret will initialize ${defaultHost} on the first service start unless another provider hostname is already configured.`;
+            }
+
+            if (status.private_dns_mode === 'off') {
+                return 'Private DNS is disabled for the Android system resolver.';
+            }
+
+            if (status.private_dns_mode === 'hostname') {
+                if (status.private_dns_hostname === defaultHost) {
+                    return `${defaultHost} is active as the nzapret default provider. Changes apply immediately.`;
+                }
+                if (status.private_dns_hostname) {
+                    return `Custom provider ${status.private_dns_hostname} is active. Changes apply immediately.`;
+                }
+                return 'Custom provider hostname is active. Changes apply immediately.';
+            }
+
+            return 'Automatic mode lets Android use encrypted DNS when the active network supports it. Changes apply immediately.';
+        }
+
+        function updatePrivateDnsUi(status = currentStatus) {
+            const label = document.getElementById('privateDnsLabel');
+            const note = document.getElementById('privateDnsNote');
+            const input = document.getElementById('privateDnsHostnameInput');
+            const applyButton = document.getElementById('btnApplyPrivateDnsHostname');
+            const buttons = document.querySelectorAll('[data-private-dns-mode]');
+            const defaultHost = getPrivateDnsDefaultHostname(status);
+            const mode = status && status.private_dns_mode ? status.private_dns_mode : '';
+            const hostname = status && status.private_dns_hostname ? status.private_dns_hostname : '';
+            const controlsDisabled = isLoading || !status || status.private_dns_available === false;
+
+            if (label) {
+                label.textContent = status && status.private_dns_label ? status.private_dns_label : '--';
+            }
+
+            if (note) {
+                note.textContent = getPrivateDnsNote(status);
+                note.classList.toggle('warning', Boolean(status && status.private_dns_available === false));
+            }
+
+            if (input) {
+                if (!privateDnsInputDirty && document.activeElement !== input) {
+                    input.value = hostname || defaultHost;
+                }
+                input.placeholder = defaultHost;
+            }
+
+            buttons.forEach((button) => {
+                let active = false;
+                if (button.dataset.privateDnsMode === 'off') {
+                    active = mode === 'off';
+                } else if (button.dataset.privateDnsMode === 'auto') {
+                    active = mode === 'opportunistic';
+                } else if (button.dataset.privateDnsMode === 'default') {
+                    active = mode === 'hostname' && hostname === defaultHost;
+                }
+                button.classList.toggle('active', active);
+                setButtonDisabled(button, controlsDisabled);
+            });
+
+            if (applyButton) {
+                const canApply = input && isValidPrivateDnsHostname(input.value);
+                setButtonDisabled(applyButton, controlsDisabled || !canApply);
+            }
         }
 
         function renderUserListPane() {
@@ -398,10 +521,12 @@
             const busy = isLoading || userListRequestInFlight;
             const savedEntries = new Set(parseUserListEntries(userListSnapshot));
             if (!userListEntries.length) {
-                pane.innerHTML = '<div class="user-list-empty">No domains in personal list.</div>';
+                pane.classList.add('empty');
+                pane.innerHTML = '<div class="user-list-empty">No personal domains yet. Add one below to include it in the active hostlist.</div>';
                 return;
             }
 
+            pane.classList.remove('empty');
             pane.innerHTML = userListEntries.map(domain => `
                 <div class="user-list-item">
                     <div class="event-dot userlist ${savedEntries.has(domain) ? 'saved' : 'pending'}"></div>
@@ -473,6 +598,31 @@
                 removeUserListDomain(button.getAttribute('data-remove-domain') || '');
             });
             updateUserListEditorState();
+        }
+
+        function setupPrivateDnsControls() {
+            const input = document.getElementById('privateDnsHostnameInput');
+            if (!input || input.dataset.bound === '1') return;
+
+            input.dataset.bound = '1';
+            input.addEventListener('input', () => {
+                privateDnsInputDirty = true;
+                updatePrivateDnsUi();
+            });
+            input.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    applyPrivateDnsHostname();
+                }
+            });
+            input.addEventListener('blur', () => {
+                if (!input.value.trim()) {
+                    privateDnsInputDirty = false;
+                }
+                updatePrivateDnsUi();
+            });
+
+            updatePrivateDnsUi();
         }
 
         function updatePageButtons() {
@@ -762,6 +912,7 @@
             const panels = document.querySelector('#pageLogs .log-panels');
             const statusBar = document.getElementById('logStatusBar');
             const card = document.querySelector('#pageLogs .card');
+            const nav = document.querySelector('.page-nav');
             if (!panels || !statusBar || !card) return;
 
             if (activePage !== 'logs') {
@@ -770,13 +921,13 @@
             }
 
             const viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-            const bodyStyles = getComputedStyle(document.body);
             const cardStyles = getComputedStyle(card);
             const panelsTop = panels.getBoundingClientRect().top;
-            const safeBottom = viewportHeight - (parseFloat(bodyStyles.paddingBottom) || 0);
+            const navTop = nav ? nav.getBoundingClientRect().top : viewportHeight;
+            const safeBottom = Math.min(viewportHeight, navTop) - 12;
             const cardBottomExtra = (parseFloat(cardStyles.paddingBottom) || 0) + (parseFloat(cardStyles.marginBottom) || 0);
             const available = Math.floor(safeBottom - panelsTop - statusBar.offsetHeight - cardBottomExtra - 4);
-            panels.style.height = `${Math.max(240, available)}px`;
+            panels.style.height = `${Math.max(96, available)}px`;
         }
 
         function syncLogPolling() {
@@ -849,6 +1000,7 @@
         function updateActionButtons(isOn) {
             if (isLoading) {
                 updateNetworkModeUi();
+                updatePrivateDnsUi();
                 updateUserListEditorState();
                 return;
             }
@@ -857,14 +1009,15 @@
             document.getElementById('btnRestart').classList.toggle('disabled', !isOn);
             document.getElementById('btnUpdate').classList.remove('disabled');
             updateNetworkModeUi();
+            updatePrivateDnsUi();
             updateUserListEditorState();
         }
 
         function applyUnavailableState(reason = 'STATUS ERROR') {
             currentStatus = null;
             document.getElementById('pidBadge').textContent = 'PID --';
-            document.getElementById('profileName').textContent = '--';
             document.getElementById('networkModeLabel').textContent = '--';
+            document.getElementById('privateDnsLabel').textContent = '--';
             document.getElementById('rulesV4').textContent = '?';
             document.getElementById('rulesV6').textContent = '?';
             document.getElementById('domainCount').textContent = '?';
@@ -884,6 +1037,7 @@
                 updateActionButtons(false);
             }
             updateNetworkModeUi(null);
+            updatePrivateDnsUi(null);
             updateUserListEditorState();
         }
 
@@ -998,14 +1152,13 @@
                 hasShownStatusError = false;
                 document.getElementById('version').textContent = status.version || 'unknown';
                 document.getElementById('pidBadge').textContent = pidCount > 1 ? `PID ${pid} +${pidCount - 1}` : `PID ${pid}`;
-                document.getElementById('profileName').textContent = status.profile_label || status.profile || '--';
                 document.getElementById('rulesV4').textContent = status.rules_v4 ?? 0;
                 document.getElementById('rulesV6').textContent = status.rules_v6 ?? 0;
                 document.getElementById('domainCount').textContent = fmt(status.domain_count ?? 0);
                 document.getElementById('googleDomainCount').textContent = fmt(status.google_domain_count ?? 0);
                 document.getElementById('userDomainCount').textContent = fmt(status.user_domain_count ?? 0);
-                updateProfileSlider(status.profile);
                 updateNetworkModeUi(status);
+                updatePrivateDnsUi(status);
                 updateUserListEditorState();
 
                 const card = document.getElementById('statusCard');
@@ -1062,71 +1215,136 @@
             if (button) button.classList.remove('loading');
         }
 
-        // --- Profile slider ---
-        async function updateProfileSlider(activeProfile) {
-            const slider = document.getElementById('profileSlider');
-            if (!slider) return;
-
-            if (!profilesLoaded) {
-                try {
-                    const res = await exec(`${CLI} profile list`);
-                    const lines = (res.stdout || '').trim().split('\n');
-                    slider.innerHTML = '';
-
-                    lines.forEach(line => {
-                        if (!line || line.includes('no profiles found')) return;
-                        const parts = line.split('\t');
-                        const name = parts[0];
-                        const label = parts[1] || name;
-
-                        const btn = document.createElement('button');
-                        btn.type = 'button';
-                        btn.className = 'profile-item';
-                        btn.innerHTML = `
-                            <span class="profile-item-label">${esc(label)}</span>
-                            <span class="profile-item-meta">${esc(name)}</span>
-                        `;
-                        btn.dataset.profile = name;
-                        btn.onclick = () => setProfile(name);
-                        slider.appendChild(btn);
-                    });
-                    profilesLoaded = true;
-                } catch (error) {
-                    console.error('Failed to load profiles:', error);
-                    return;
-                }
-            }
-
-            const items = slider.querySelectorAll('.profile-item');
-            items.forEach(item => {
-                item.classList.toggle('active', item.dataset.profile === activeProfile);
-            });
-        }
-
-        async function setProfile(name) {
-            if (isLoading || (currentStatus && currentStatus.profile === name)) return;
-
-            const result = await runCli(`profile set ${shellQuote(name)}`, {
-                loadingText: 'Changing profile...',
-                successText: 'Profile set'
-            });
-            if (result.ok) {
-                showToast('Restart nzapret to apply changes');
-                const items = document.querySelectorAll('#profileSlider .profile-item');
-                items.forEach(i => i.classList.toggle('active', i.dataset.profile === name));
-            }
-        }
-
         async function setNetworkMode(mode) {
-            if (isLoading || (currentStatus && currentStatus.network_mode === mode)) return;
+            if (isLoading || !currentStatus) return;
 
-            const result = await runCli(`network set ${shellQuote(mode)}`, {
-                loadingText: 'Saving network mode...',
-                successText: 'Network mode set'
+            if (currentStatus.network_mode === mode) {
+                networkModeDraft = '';
+            } else {
+                networkModeDraft = mode;
+            }
+
+            updateNetworkModeUi(currentStatus);
+        }
+
+        async function saveNetworkMode() {
+            if (isLoading || !currentStatus || !isNetworkModeDirty(currentStatus)) return;
+
+            const selectedMode = getSelectedNetworkMode(currentStatus);
+            const shouldRestart = Boolean(currentStatus.active);
+            const loadingText = shouldRestart
+                ? 'Saving network mode and restarting nzapret...'
+                : 'Saving network mode...';
+
+            isLoading = true;
+            setUiLocked(true, loadingText);
+            await waitForPaint();
+
+            let savedMode = false;
+            try {
+                const saveRes = await exec(`${CLI} network set ${shellQuote(selectedMode)}`);
+                if (saveRes.errno !== 0) {
+                    const details = [saveRes.stdout || '', saveRes.stderr || ''].join('\n').trim();
+                    throw new Error(details || 'Failed to save network mode');
+                }
+                savedMode = true;
+
+                if (shouldRestart) {
+                    const restartRes = await exec(`${CLI} restart`);
+                    if (restartRes.errno !== 0) {
+                        const details = [restartRes.stdout || '', restartRes.stderr || ''].join('\n').trim();
+                        throw new Error(details || 'Failed to restart nzapret');
+                    }
+                }
+
+                networkModeDraft = '';
+                await refreshStatus(true);
+                if (activePage === 'logs') {
+                    if (activeLogView === 'events') {
+                        await refreshEvents();
+                    } else {
+                        await refreshLog();
+                    }
+                }
+                showToast(shouldRestart ? 'Network mode saved and nzapret restarted' : 'Network mode saved');
+            } catch (error) {
+                if (savedMode) {
+                    networkModeDraft = '';
+                    await refreshStatus(true);
+                    showToast(shouldRestart ? 'Network mode saved, but restart failed' : 'Network mode saved');
+                } else {
+                    showToast(`Error: ${error.message}`);
+                }
+            } finally {
+                isLoading = false;
+                setUiLocked(false);
+                updateActionButtons(Boolean(currentStatus && currentStatus.active));
+            }
+        }
+
+        async function setPrivateDnsMode(mode) {
+            if (isLoading || !currentStatus || currentStatus.private_dns_available === false) return;
+
+            const currentMode = currentStatus.private_dns_mode || '';
+            if ((mode === 'off' && currentMode === 'off')
+                || (mode === 'auto' && currentMode === 'opportunistic')) {
+                return;
+            }
+
+            const result = await runCli(`dns set ${shellQuote(mode)}`, {
+                loadingText: mode === 'off' ? 'Disabling Private DNS...' : 'Switching Private DNS to automatic mode...',
+                successText: 'Private DNS updated'
             });
             if (result.ok) {
-                showToast('Restart nzapret to apply changes');
-                updateNetworkModeUi(currentStatus);
+                privateDnsInputDirty = false;
+                updatePrivateDnsUi(currentStatus);
+            }
+        }
+
+        async function setPrivateDnsDefault() {
+            if (isLoading || !currentStatus || currentStatus.private_dns_available === false) return;
+
+            const defaultHost = getPrivateDnsDefaultHostname(currentStatus);
+            if (currentStatus.private_dns_mode === 'hostname' && currentStatus.private_dns_hostname === defaultHost) {
+                return;
+            }
+
+            const result = await runCli('dns set default', {
+                loadingText: `Applying ${defaultHost}...`,
+                successText: 'Private DNS updated'
+            });
+            if (result.ok) {
+                privateDnsInputDirty = false;
+                updatePrivateDnsUi(currentStatus);
+            }
+        }
+
+        async function applyPrivateDnsHostname() {
+            if (isLoading || !currentStatus || currentStatus.private_dns_available === false) return;
+
+            const input = document.getElementById('privateDnsHostnameInput');
+            if (!input) return;
+
+            const hostname = input.value.trim().toLowerCase();
+            if (!isValidPrivateDnsHostname(hostname)) {
+                showToast('Enter a valid provider hostname');
+                updatePrivateDnsUi(currentStatus);
+                return;
+            }
+
+            if (currentStatus.private_dns_mode === 'hostname' && currentStatus.private_dns_hostname === hostname) {
+                privateDnsInputDirty = false;
+                updatePrivateDnsUi(currentStatus);
+                return;
+            }
+
+            const result = await runCli(`dns set hostname ${shellQuote(hostname)}`, {
+                loadingText: 'Applying Private DNS hostname...',
+                successText: 'Private DNS updated'
+            });
+            if (result.ok) {
+                privateDnsInputDirty = false;
+                updatePrivateDnsUi(currentStatus);
             }
         }
 
@@ -1291,8 +1509,11 @@
         // --- Exports ---
         window.doAction = doAction;
         window.setPage = setPage;
-        window.setProfile = setProfile;
         window.setNetworkMode = setNetworkMode;
+        window.saveNetworkMode = saveNetworkMode;
+        window.setPrivateDnsMode = setPrivateDnsMode;
+        window.setPrivateDnsDefault = setPrivateDnsDefault;
+        window.applyPrivateDnsHostname = applyPrivateDnsHostname;
         window.reloadUserList = reloadUserList;
         window.addUserListDomain = addUserListDomain;
         window.saveUserList = saveUserList;
@@ -1306,7 +1527,9 @@
         // --- Init ---
         setupScrollTracking();
         setupUserListEditor();
+        setupPrivateDnsControls();
         updateNetworkModeUi();
+        updatePrivateDnsUi();
         startStatusPolling();
         renderPages();
         renderLogView();

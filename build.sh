@@ -50,9 +50,13 @@ EXTRA_TEXT_FILES=(
 
 RUNTIME_ARTIFACTS=(
     ".list_count"
+    ".private_dns_initialized"
+    ".list-user.install.bak"
+    ".network-mode.install.bak"
     "nzapret.log"
     "nzapret.log.prev"
     "nzapret-events.log"
+    "profiles/network.mode"
 )
 
 EXECUTABLE_PATHS=(
@@ -146,9 +150,13 @@ create_zip_archive() {
     zip -r9 "$ZIP_PATH" . \
         -x "*.git*" \
         -x ".list_count" \
+        -x ".private_dns_initialized" \
+        -x ".list-user.install.bak" \
+        -x ".network-mode.install.bak" \
         -x "nzapret.log" \
         -x "nzapret.log.prev" \
         -x "nzapret-events.log" \
+        -x "profiles/network.mode" \
         -x "*.tmp" \
         -x "Thumbs.db" \
         -x ".DS_Store"

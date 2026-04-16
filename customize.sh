@@ -1,10 +1,15 @@
 SKIPUNZIP=1
+MODULE_ID="nzapret"
 BIN_DIR="$MODPATH/bin"
 LISTS_DIR="$MODPATH/lists"
 PROFILE_DIR="$MODPATH/profiles"
 ACTIVE_PROFILE_FILE="$MODPATH/profiles/profile.current"
+NETWORK_MODE_FILE="$PROFILE_DIR/network.mode"
 USER_LIST_FILE="$LISTS_DIR/list-user.txt"
+LIVE_MODULE_DIR="/data/adb/modules/$MODULE_ID"
+UPDATE_MODULE_DIR="/data/adb/modules_update/$MODULE_ID"
 PRESERVED_USER_LIST_FILE="$MODPATH/.list-user.install.bak"
+PRESERVED_NETWORK_MODE_FILE="$MODPATH/.network-mode.install.bak"
 PRESERVED_PROFILE=""
 
 # Preserve the selected profile across module upgrades/reinstalls.
@@ -16,11 +21,43 @@ read_preserved_profile() {
 }
 
 # Save the mutable personal list before unzip overwrites module files.
+# During updates, Magisk/KernelSU may install into a staging directory while the
+# previously installed module still lives under /data/adb/modules/nzapret.
 preserve_user_list() {
     rm -f "$PRESERVED_USER_LIST_FILE"
-    if [ -f "$USER_LIST_FILE" ]; then
-        cat "$USER_LIST_FILE" > "$PRESERVED_USER_LIST_FILE" || abort "! Failed to preserve user list"
-    fi
+    for _list_candidate in \
+        "$USER_LIST_FILE" \
+        "$LIVE_MODULE_DIR/lists/list-user.txt" \
+        "$UPDATE_MODULE_DIR/lists/list-user.txt"
+    do
+        [ -f "$_list_candidate" ] || continue
+        [ "$_list_candidate" = "$PRESERVED_USER_LIST_FILE" ] && continue
+        cat "$_list_candidate" > "$PRESERVED_USER_LIST_FILE" || abort "! Failed to preserve user list"
+        return
+    done
+}
+
+normalize_network_mode() {
+    _mode=$(printf '%s' "$1" | tr -d '\r\n')
+    case "$_mode" in
+        "auto"|"ipv4-only") echo "$_mode" ;;
+        *) echo "" ;;
+    esac
+}
+
+preserve_network_mode() {
+    rm -f "$PRESERVED_NETWORK_MODE_FILE"
+    for _mode_candidate in \
+        "$NETWORK_MODE_FILE" \
+        "$LIVE_MODULE_DIR/profiles/network.mode" \
+        "$UPDATE_MODULE_DIR/profiles/network.mode"
+    do
+        [ -f "$_mode_candidate" ] || continue
+        _mode=$(normalize_network_mode "$(head -n 1 "$_mode_candidate" 2>/dev/null)")
+        [ -n "$_mode" ] || continue
+        printf '%s\n' "$_mode" > "$PRESERVED_NETWORK_MODE_FILE" || abort "! Failed to preserve network mode"
+        return
+    done
 }
 
 prepare_directories() {
@@ -34,6 +71,16 @@ restore_user_list() {
     fi
     [ -f "$USER_LIST_FILE" ] || : > "$USER_LIST_FILE"
     rm -f "$PRESERVED_USER_LIST_FILE"
+}
+
+restore_network_mode() {
+    if [ -f "$PRESERVED_NETWORK_MODE_FILE" ]; then
+        _mode=$(normalize_network_mode "$(head -n 1 "$PRESERVED_NETWORK_MODE_FILE" 2>/dev/null)")
+        if [ -n "$_mode" ]; then
+            printf '%s\n' "$_mode" > "$NETWORK_MODE_FILE" || abort "! Failed to restore network mode"
+        fi
+    fi
+    rm -f "$PRESERVED_NETWORK_MODE_FILE"
 }
 
 # Restore the previous active profile pointer if one existed.
@@ -73,6 +120,7 @@ configure_permissions() {
 
 read_preserved_profile
 preserve_user_list
+preserve_network_mode
 
 ui_print "- Preparing module files..."
 unzip -oq "$ZIPFILE" -x 'META-INF/*' -d "$MODPATH" || abort "! Failed to extract module files"
@@ -80,6 +128,7 @@ unzip -oq "$ZIPFILE" -x 'META-INF/*' -d "$MODPATH" || abort "! Failed to extract
 # Rebuild the module layout from the fresh payload, then restore mutable state.
 prepare_directories
 restore_user_list
+restore_network_mode
 restore_active_profile
 select_arch_binary
 cleanup_unused_binaries
