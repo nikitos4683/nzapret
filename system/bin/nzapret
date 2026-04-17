@@ -627,9 +627,9 @@ remove_user_list_entries() {
 print_user_list_status() {
     _user_count=$(get_user_list_count)
     if active_profile_uses_user_list; then
-        echo "list-user.txt: $_user_count domains (active in current profile)"
+        echo "list-user.txt: $_user_count domains (included by current configuration)"
     else
-        echo "list-user.txt: $_user_count domains (current profile does not reference it)"
+        echo "list-user.txt: $_user_count domains (current configuration does not reference it)"
     fi
     echo ""
     echo "Domains:"
@@ -649,7 +649,7 @@ print_user_list_contents() {
 
 print_profile_status() {
     _pname=$(get_active_profile)
-    echo "Active profile: $_pname ($(get_profile_label "$_pname"))"
+    echo "Configuration preset: $_pname ($(get_profile_label "$_pname"))"
 }
 
 print_network_mode_status() {
@@ -678,7 +678,6 @@ print_status_human() {
     echo "iptables rules: $_rules (IPv4), $_rules6 (IPv6)"
     print_network_mode_status
     echo "Private DNS: $(get_private_dns_status_summary)"
-    print_profile_status
     echo ""
 
     if [ -f "$GENERAL_LIST_FILE" ]; then
@@ -695,9 +694,9 @@ print_status_human() {
 
     echo "list-user.txt: $_user_lc domains"
     if active_profile_uses_user_list; then
-        echo "list-user binding: active in current profile"
+        echo "list-user binding: included by current configuration"
     else
-        echo "list-user binding: inactive (profile missing --hostlist=$USER_LIST_FILE)"
+        echo "list-user binding: inactive (current configuration missing --hostlist=$USER_LIST_FILE)"
     fi
 }
 
@@ -931,9 +930,9 @@ run_diagnose() {
     fi
 
     if active_profile_uses_user_list; then
-        print_human_check ok "active profile includes list-user.txt"
+        print_human_check ok "current configuration includes list-user.txt"
     else
-        print_human_check fail "active profile does not reference list-user.txt"
+        print_human_check fail "current configuration does not reference list-user.txt"
     fi
 
     print_human_check ok "$(print_network_mode_status)"
@@ -976,8 +975,6 @@ run_diagnose() {
             print_human_check fail "IPv6 route lookup failed or not configured"
         fi
     fi
-
-    print_profile_status
 }
 
 run_diagnose_json() {
@@ -1024,9 +1021,9 @@ run_diagnose_json() {
     fi
 
     if active_profile_uses_user_list; then
-        append_json_check "list-user binding" "ok" "active profile includes list-user.txt"
+        append_json_check "list-user binding" "ok" "current configuration includes list-user.txt"
     else
-        append_json_check "list-user binding" "fail" "active profile does not reference list-user.txt"
+        append_json_check "list-user binding" "fail" "current configuration does not reference list-user.txt"
     fi
 
     append_json_check "network mode" "ok" "$(get_runtime_network_mode_label)"
@@ -1226,7 +1223,7 @@ case "$1" in
                 }
                 set_active_profile "$3"
                 log_event PROFILE "changed to $3 ($(get_profile_label "$3"))"
-                echo "[+] Active profile set to: $3"
+                echo "[+] Configuration preset set to: $3"
                 echo "[*] Restart nzapret to apply changes"
                 ;;
             *)
@@ -1460,7 +1457,6 @@ case "$1" in
         echo "  events                      - show event history"
         echo "  events clear                - clear the whole event log file"
         echo "  events --json [--tail=N]    - event history as JSON"
-        echo "  profile <subcommand>        - show, list or switch nfqws2 profiles"
         echo "  network <subcommand>        - configure auto or IPv4-only firewall mode"
         echo "  dns <subcommand>            - manage Android Private DNS"
         echo "  list-user <subcommand>      - manage the personal domain hostlist"
@@ -1468,7 +1464,6 @@ case "$1" in
         echo "  diagnose --json             - diagnostics as JSON for WebUI"
         echo "  help                        - show this help message"
         echo ""
-        echo "Profile commands: status, list, set <name>"
         echo "Network commands: status, set <auto|ipv4-only>"
         echo "DNS commands: status, set <off|auto|default>, set hostname <fqdn>"
         echo "User list commands: status, show, add, remove, replace, clear"

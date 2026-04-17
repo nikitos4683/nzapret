@@ -123,7 +123,7 @@
 
                 <div class="user-list-meta">
                     <span class="user-list-badge" id="userListCountBadge">0 domains</span>
-                    <span class="user-list-note" id="userListProfileNote">Linked to current profile.</span>
+                    <span class="user-list-note" id="userListBindingNote">Applied by the current configuration.</span>
                 </div>
 
                 <div class="user-list-pane empty" id="userListPane">
@@ -582,16 +582,16 @@
             document.getElementById('userListDirtyNote').textContent = isDirty ? 'Unsaved changes. Press Save to apply them.' : 'No unsaved changes.';
             document.getElementById('userListDirtyNote').classList.toggle('warning', isDirty);
 
-            const note = document.getElementById('userListProfileNote');
+            const note = document.getElementById('userListBindingNote');
             const attached = currentStatus && typeof currentStatus.user_list_attached === 'boolean'
                 ? currentStatus.user_list_attached
                 : null;
             if (attached === false) {
-                note.textContent = 'Current profile does not reference list-user.txt yet.';
+                note.textContent = 'Current configuration does not reference list-user.txt yet.';
             } else if (attached === true) {
-                note.textContent = 'Linked to current profile.';
+                note.textContent = 'Applied by the current configuration.';
             } else {
-                note.textContent = 'Profile status unavailable.';
+                note.textContent = 'Configuration status unavailable.';
             }
             note.classList.toggle('warning', attached === false);
 
