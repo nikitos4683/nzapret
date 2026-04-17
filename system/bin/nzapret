@@ -153,6 +153,22 @@ get_runtime_network_mode_label() {
     esac
 }
 
+get_runtime_network_mode_code() {
+    _mode=$(get_configured_network_mode)
+    case "$_mode" in
+        "ipv4-only")
+            echo "ipv4_only"
+            ;;
+        *)
+            if ipv6_network_available && ip6tables_supported; then
+                echo "auto_dual_stack"
+            else
+                echo "auto_ipv4_fallback"
+            fi
+            ;;
+    esac
+}
+
 private_dns_available() {
     has_cmd settings
 }
@@ -286,6 +302,35 @@ get_private_dns_status_summary() {
     esac
 }
 
+get_private_dns_status_code() {
+    if ! private_dns_available; then
+        echo "unavailable"
+        return
+    fi
+
+    _mode=$(get_private_dns_mode)
+    _host=$(get_private_dns_hostname)
+    case "$_mode" in
+        "off")
+            echo "off"
+            ;;
+        "hostname")
+            if [ -n "$_host" ]; then
+                if [ "$_host" = "$DEFAULT_PRIVATE_DNS_HOSTNAME" ]; then
+                    echo "hostname_default"
+                else
+                    echo "hostname_custom"
+                fi
+            else
+                echo "hostname_unspecified"
+            fi
+            ;;
+        *)
+            echo "auto"
+            ;;
+    esac
+}
+
 set_private_dns_mode_off() {
     private_dns_available || return 1
     put_global_setting private_dns_mode off || return 1
@@ -337,6 +382,13 @@ json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
+json_optional_field() {
+    _key="$1"
+    _value="$2"
+    [ -n "$_value" ] || return 0
+    printf ',"%s":"%s"' "$_key" "$(json_escape "$_value")"
+}
+
 print_human_check() {
     _status="$1"
     _detail="$2"
@@ -347,10 +399,34 @@ print_human_check() {
 }
 
 append_json_check() {
+    # Positional args:
+    # 1=name 2=status 3=detail 4=code 5=detail_code 6=subject
+    # 7=table 8=hook 9=family 10=mode 11=pid 12=hostname 13=default_hostname
     _name="$1"
     _status="$2"
     _detail="$3"
-    _checks="${_checks}${_sep}{\"name\":\"$(json_escape "$_name")\",\"status\":\"$_status\",\"detail\":\"$(json_escape "$_detail")\"}"
+    _code="${4:-}"
+    _detail_code="${5:-}"
+    _subject="${6:-}"
+    _table="${7:-}"
+    _hook="${8:-}"
+    _family="${9:-}"
+    _mode="${10:-}"
+    _pid="${11:-}"
+    _hostname="${12:-}"
+    _default_hostname="${13:-}"
+    _extra=""
+    [ -n "$_code" ] && _extra="${_extra},\"code\":\"$(json_escape "$_code")\""
+    [ -n "$_detail_code" ] && _extra="${_extra},\"detail_code\":\"$(json_escape "$_detail_code")\""
+    _extra="${_extra}$(json_optional_field "subject" "$_subject")"
+    _extra="${_extra}$(json_optional_field "table" "$_table")"
+    _extra="${_extra}$(json_optional_field "hook" "$_hook")"
+    _extra="${_extra}$(json_optional_field "family" "$_family")"
+    _extra="${_extra}$(json_optional_field "mode" "$_mode")"
+    _extra="${_extra}$(json_optional_field "pid" "$_pid")"
+    _extra="${_extra}$(json_optional_field "hostname" "$_hostname")"
+    _extra="${_extra}$(json_optional_field "default_hostname" "$_default_hostname")"
+    _checks="${_checks}${_sep}{\"name\":\"$(json_escape "$_name")\",\"status\":\"$_status\",\"detail\":\"$(json_escape "$_detail")\"${_extra}}"
     _sep=","
     if [ "$_status" = "ok" ]; then
         _ok=$((_ok + 1))
@@ -983,85 +1059,88 @@ run_diagnose_json() {
     _fail=0
     _sep=""
     _network_mode=$(get_configured_network_mode)
+    _network_mode_code=$(get_runtime_network_mode_code)
 
     for _cmd in $DIAGNOSE_COMMANDS; do
         if has_cmd "$_cmd"; then
-            append_json_check "$_cmd" "ok" "command available"
+            append_json_check "$_cmd" "ok" "command available" "command" "available" "$_cmd"
         else
-            append_json_check "$_cmd" "fail" "command missing"
+            append_json_check "$_cmd" "fail" "command missing" "command" "missing" "$_cmd"
         fi
     done
 
     if [ "$_network_mode" = "ipv4-only" ]; then
-        append_json_check "ip6tables" "ok" "not required in IPv4-only mode"
+        append_json_check "ip6tables" "ok" "not required in IPv4-only mode" "ip6tables_runtime" "not_required" "ip6tables" "" "" "ipv6" "$_network_mode"
     elif has_cmd ip6tables; then
         if ip6tables_supported; then
-            append_json_check "ip6tables" "ok" "command available"
+            append_json_check "ip6tables" "ok" "command available" "ip6tables_runtime" "available" "ip6tables" "" "" "ipv6" "$_network_mode"
         else
-            append_json_check "ip6tables" "fail" "present but unusable"
+            append_json_check "ip6tables" "fail" "present but unusable" "ip6tables_runtime" "unusable" "ip6tables" "" "" "ipv6" "$_network_mode"
         fi
     else
-        append_json_check "ip6tables" "ok" "missing, auto mode will use IPv4-only fallback"
+        append_json_check "ip6tables" "ok" "missing, auto mode will use IPv4-only fallback" "ip6tables_runtime" "missing_fallback" "ip6tables" "" "" "ipv6" "$_network_mode"
     fi
 
     for _file in $(list_required_runtime_files); do
         _fname=$(basename "$_file")
         if [ -f "$_file" ]; then
-            append_json_check "$_fname" "ok" "file present"
+            append_json_check "$_fname" "ok" "file present" "runtime_file" "present" "$_fname"
         else
-            append_json_check "$_fname" "fail" "file missing"
+            append_json_check "$_fname" "fail" "file missing" "runtime_file" "missing" "$_fname"
         fi
     done
 
     _pid=$(get_first_pid)
     if [ -n "$_pid" ]; then
-        append_json_check "$PROCESS_NAME process" "ok" "running (pid: $_pid)"
+        append_json_check "$PROCESS_NAME process" "ok" "running (pid: $_pid)" "process" "running" "$PROCESS_NAME" "" "" "" "" "$_pid"
     else
-        append_json_check "$PROCESS_NAME process" "fail" "not running"
+        append_json_check "$PROCESS_NAME process" "fail" "not running" "process" "not_running" "$PROCESS_NAME"
     fi
 
     if active_profile_uses_user_list; then
-        append_json_check "list-user binding" "ok" "current configuration includes list-user.txt"
+        append_json_check "list-user binding" "ok" "current configuration includes list-user.txt" "userlist_binding" "attached" "list-user.txt"
     else
-        append_json_check "list-user binding" "fail" "current configuration does not reference list-user.txt"
+        append_json_check "list-user binding" "fail" "current configuration does not reference list-user.txt" "userlist_binding" "detached" "list-user.txt"
     fi
 
-    append_json_check "network mode" "ok" "$(get_runtime_network_mode_label)"
+    append_json_check "network mode" "ok" "$(get_runtime_network_mode_label)" "network_mode" "$_network_mode_code" "" "" "" "" "$_network_mode"
     if private_dns_available; then
-        append_json_check "private dns" "ok" "$(get_private_dns_status_summary)"
+        _private_dns_code=$(get_private_dns_status_code)
+        _private_dns_host=$(get_private_dns_hostname)
+        append_json_check "private dns" "ok" "$(get_private_dns_status_summary)" "private_dns" "$_private_dns_code" "" "" "" "" "" "" "$_private_dns_host" "$DEFAULT_PRIVATE_DNS_HOSTNAME"
     else
-        append_json_check "private dns" "fail" "settings command missing"
+        append_json_check "private dns" "fail" "settings command missing" "private_dns" "unavailable" "" "" "" "" "" "" "" "$DEFAULT_PRIVATE_DNS_HOSTNAME"
     fi
 
     for _hook in OUTPUT FORWARD; do
         if check_jump_rule iptables "$_hook"; then
-            append_json_check "iptables $_hook" "ok" "jump present"
+            append_json_check "iptables $_hook" "ok" "jump present" "jump_rule" "present" "iptables" "iptables" "$_hook" "ipv4"
         else
-            append_json_check "iptables $_hook" "fail" "jump missing"
+            append_json_check "iptables $_hook" "fail" "jump missing" "jump_rule" "missing" "iptables" "iptables" "$_hook" "ipv4"
         fi
         if ipv6_firewall_enabled; then
             if check_jump_rule ip6tables "$_hook"; then
-                append_json_check "ip6tables $_hook" "ok" "jump present"
+                append_json_check "ip6tables $_hook" "ok" "jump present" "jump_rule" "present" "ip6tables" "ip6tables" "$_hook" "ipv6"
             else
-                append_json_check "ip6tables $_hook" "fail" "jump missing"
+                append_json_check "ip6tables $_hook" "fail" "jump missing" "jump_rule" "missing" "ip6tables" "ip6tables" "$_hook" "ipv6"
             fi
         else
-            append_json_check "ip6tables $_hook" "ok" "skipped (IPv4-only path)"
+            append_json_check "ip6tables $_hook" "ok" "skipped (IPv4-only path)" "jump_rule" "skipped_ipv4_only" "ip6tables" "ip6tables" "$_hook" "ipv6"
         fi
     done
 
     if has_cmd ip; then
         if ip route get 1.1.1.1 >/dev/null 2>&1; then
-            append_json_check "IPv4 routing" "ok" "route lookup works"
+            append_json_check "IPv4 routing" "ok" "route lookup works" "routing" "ok" "" "" "" "ipv4"
         else
-            append_json_check "IPv4 routing" "fail" "route lookup failed"
+            append_json_check "IPv4 routing" "fail" "route lookup failed" "routing" "fail" "" "" "" "ipv4"
         fi
         if [ "$_network_mode" = "ipv4-only" ]; then
-            append_json_check "IPv6 routing" "ok" "disabled by mode"
+            append_json_check "IPv6 routing" "ok" "disabled by mode" "routing" "disabled" "" "" "" "ipv6"
         elif ipv6_network_available; then
-            append_json_check "IPv6 routing" "ok" "route lookup works"
+            append_json_check "IPv6 routing" "ok" "route lookup works" "routing" "ok" "" "" "" "ipv6"
         else
-            append_json_check "IPv6 routing" "fail" "route lookup failed or not configured"
+            append_json_check "IPv6 routing" "fail" "route lookup failed or not configured" "routing" "fail" "" "" "" "ipv6"
         fi
     fi
 

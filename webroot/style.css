@@ -173,6 +173,7 @@ body.ui-busy .icon-btn {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 12px;
     margin-bottom: 20px;
     padding: 0 2px;
 }
@@ -181,6 +182,7 @@ body.ui-busy .icon-btn {
     display: flex;
     align-items: center;
     gap: 12px;
+    min-width: 0;
 }
 
 .logo {
@@ -214,6 +216,39 @@ body.ui-busy .icon-btn {
     font-weight: 400;
 }
 
+.locale-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-input);
+    box-shadow: var(--shadow);
+    flex-shrink: 0;
+}
+
+.locale-btn {
+    border: none;
+    min-width: 38px;
+    min-height: 30px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.locale-btn.active {
+    background: linear-gradient(135deg, var(--accent), #7c4dff);
+    color: #ffffff;
+    box-shadow: 0 8px 18px var(--accent-glow);
+}
+
 .page-nav {
     position: fixed;
     left: 50%;
@@ -243,10 +278,10 @@ body.ui-busy .icon-btn {
     border-radius: 14px;
     padding: 13px 10px;
     font-family: 'Inter', sans-serif;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
-    letter-spacing: 0.4px;
-    text-transform: uppercase;
+    letter-spacing: 0.2px;
+    line-height: 1.15;
     cursor: pointer;
     transition: all 0.2s ease;
     text-align: center;
@@ -372,8 +407,8 @@ body.ui-busy .icon-btn {
 .status-label {
     font-size: 12px;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 1.8px;
+    letter-spacing: 0.8px;
+    line-height: 1.2;
 }
 
 .status-label.on { color: var(--green); }
@@ -494,6 +529,12 @@ body.ui-busy .icon-btn {
     box-shadow: var(--shadow);
 }
 
+.action-btn span {
+    display: block;
+    line-height: 1.2;
+    text-align: center;
+}
+
 .action-btn:active {
     transform: scale(0.94);
     border-color: var(--border-hover);
@@ -579,6 +620,9 @@ body.ui-busy .icon-btn {
     cursor: pointer;
     color: var(--text-secondary);
     transition: all 0.2s ease;
+    line-height: 1.2;
+    text-align: center;
+    white-space: normal;
 }
 .icon-btn:active {
     transform: scale(0.98);
@@ -676,7 +720,7 @@ body.ui-busy .icon-btn {
 }
 
 .private-dns-apply-btn {
-    white-space: nowrap;
+    white-space: normal;
 }
 
 .tools-support-line {
@@ -1444,7 +1488,7 @@ body.ui-busy .icon-btn {
 }
 
 .diag-run-btn-label {
-    white-space: nowrap;
+    white-space: normal;
 }
 
 .diag-run-btn.loading {
@@ -1458,6 +1502,25 @@ body.ui-busy .icon-btn {
 
 .diag-run-btn.loading .diag-run-btn-icon {
     animation: cautionPulse 0.9s ease-in-out infinite;
+}
+
+@media (max-width: 420px) {
+    .private-dns-custom-row {
+        grid-template-columns: 1fr;
+    }
+
+    .private-dns-apply-btn {
+        width: 100%;
+    }
+
+    #diagCard .panel-head {
+        flex-direction: column;
+    }
+
+    #diagCard .diag-run-btn {
+        width: 100%;
+        justify-content: center;
+    }
 }
 
 @keyframes cautionPulse {
