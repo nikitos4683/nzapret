@@ -89,21 +89,7 @@ detect_default_network_mode() {
         echo "auto"
         return
     fi
-
-    if has_cmd ip; then
-        if ip route get 1.1.1.1 >/dev/null 2>&1; then
-            echo "ipv4-only"
-            return
-        fi
-        echo "ipv4-only"
-        return
-    fi
-
-    if ip6tables_supported; then
-        echo "auto"
-    else
-        echo "ipv4-only"
-    fi
+    echo "ipv4-only"
 }
 
 get_network_mode() {

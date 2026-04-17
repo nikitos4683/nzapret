@@ -169,7 +169,8 @@ require_cmd mktemp
 verify_module_layout
 
 # Use module.prop as the single source of truth for release versioning.
-VERSION=$(grep '^version=' "$PROJECT_ROOT/module.prop" | cut -d= -f2 | tr -d '\r\n')
+# Local ad-hoc builds still fall back to "custom" if the version line is absent.
+VERSION=$(sed -n 's/^version=//p' "$PROJECT_ROOT/module.prop" | head -n 1 | tr -d '\r\n')
 if [ -z "$VERSION" ]; then
     VERSION="custom"
 fi

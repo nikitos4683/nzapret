@@ -14,10 +14,17 @@ PRESERVED_PROFILE=""
 
 # Preserve the selected profile across module upgrades/reinstalls.
 read_preserved_profile() {
-    if [ -f "$ACTIVE_PROFILE_FILE" ]; then
-        IFS= read -r PRESERVED_PROFILE < "$ACTIVE_PROFILE_FILE" || PRESERVED_PROFILE=""
-    fi
-    PRESERVED_PROFILE=$(printf '%s' "$PRESERVED_PROFILE" | tr -d '\r')
+    PRESERVED_PROFILE=""
+    for _profile_candidate in \
+        "$ACTIVE_PROFILE_FILE" \
+        "$LIVE_MODULE_DIR/profiles/profile.current" \
+        "$UPDATE_MODULE_DIR/profiles/profile.current"
+    do
+        [ -f "$_profile_candidate" ] || continue
+        IFS= read -r PRESERVED_PROFILE < "$_profile_candidate" || PRESERVED_PROFILE=""
+        PRESERVED_PROFILE=$(printf '%s' "$PRESERVED_PROFILE" | tr -d '\r')
+        [ -n "$PRESERVED_PROFILE" ] && return
+    done
 }
 
 # Save the mutable personal list before unzip overwrites module files.
@@ -86,7 +93,7 @@ restore_network_mode() {
 # Restore the previous active profile pointer if one existed.
 restore_active_profile() {
     if [ -n "$PRESERVED_PROFILE" ]; then
-        printf '%s\n' "$PRESERVED_PROFILE" > "$ACTIVE_PROFILE_FILE" || abort "! Failed to preserve active profile"
+        printf '%s\n' "$PRESERVED_PROFILE" > "$ACTIVE_PROFILE_FILE" || abort "! Failed to restore active profile"
     fi
 }
 

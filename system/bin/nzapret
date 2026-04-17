@@ -75,21 +75,7 @@ detect_default_network_mode() {
         echo "auto"
         return
     fi
-
-    if has_cmd ip; then
-        if ip route get 1.1.1.1 >/dev/null 2>&1; then
-            echo "ipv4-only"
-            return
-        fi
-        echo "ipv4-only"
-        return
-    fi
-
-    if ip6tables_supported; then
-        echo "auto"
-    else
-        echo "ipv4-only"
-    fi
+    echo "ipv4-only"
 }
 
 get_configured_network_mode() {
@@ -849,7 +835,10 @@ download_to_tmp() {
     _url="$1"
     _dest="$2"
     _label="$3"
-    _tmp=$(mktemp 2>/dev/null || echo "/data/local/tmp/$(basename "$_dest").tmp")
+    _tmp=$(make_temp_file) || {
+        echo "[-] Failed to create temporary file for $_label"
+        return 1
+    }
 
     curl -s -f -L -o "$_tmp" "$_url" 2>/dev/null
     if [ -s "$_tmp" ]; then
@@ -864,10 +853,7 @@ download_to_tmp() {
 }
 
 update_list_file() {
-    if download_to_tmp "$DEFAULT_LIST_SOURCE" "$GENERAL_LIST_FILE" "list-general.txt"; then
-        return 0
-    fi
-    return 1
+    download_to_tmp "$DEFAULT_LIST_SOURCE" "$GENERAL_LIST_FILE" "list-general.txt"
 }
 
 list_required_runtime_files() {

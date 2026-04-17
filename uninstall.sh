@@ -19,11 +19,6 @@ has_cmd() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Silent exit if command is missing (system might be in minimal state during uninstall).
-require_cmd() {
-    has_cmd "$1" || exit 0
-}
-
 check_jump_rule() {
     _tbl="$1"
     _hook="$2"
@@ -62,9 +57,11 @@ write_stop_event() {
 # Best-effort process stop first, then firewall cleanup below.
 killall "$PROCESS_NAME" 2>/dev/null
 
-# Dependencies check
-require_cmd iptables
+if has_cmd iptables; then
+    cleanup_tables
+else
+    log "iptables command missing, skipping firewall cleanup"
+fi
 
-cleanup_tables
 log "service uninstalled"
 write_stop_event

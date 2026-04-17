@@ -570,7 +570,14 @@ body.ui-busy .icon-btn {
 .icon-btn {
     border: 1px solid var(--border);
     background: var(--bg-input);
-    color: var(--text-primary);
+    min-height: 34px;
+    padding: 7px 11px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: 'Inter', sans-serif;
+    cursor: pointer;
+    color: var(--text-secondary);
     transition: all 0.2s ease;
 }
 .icon-btn:active {
@@ -901,17 +908,6 @@ body.ui-busy .icon-btn {
     min-height: 42px;
     border-radius: 12px;
     font-size: 12px;
-}
-
-.icon-btn {
-    min-height: 34px;
-    padding: 7px 11px;
-    border-radius: 10px;
-    font-size: 11px;
-    font-weight: 700;
-    font-family: 'Inter', sans-serif;
-    cursor: pointer;
-    color: var(--text-secondary);
 }
 
 .icon-btn.active {
