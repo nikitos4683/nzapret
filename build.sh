@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# nzapret — build.sh
+# Packaging helper for staging the module tree and creating the release ZIP.
 
 # Exit on any error
 set -eu

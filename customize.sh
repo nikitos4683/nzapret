@@ -1,3 +1,6 @@
+# nzapret — customize.sh
+# Magisk/KernelSU install-time customization hook.
+
 SKIPUNZIP=1
 MODULE_ID="nzapret"
 BIN_DIR="$MODPATH/bin"
