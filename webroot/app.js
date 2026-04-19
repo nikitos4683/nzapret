@@ -11,24 +11,55 @@ import {
 
 const MODDIR = '/data/adb/modules/nzapret';
 const CLI = `sh ${MODDIR}/system/bin/nzapret`;
-const STATUS_POLL_MS = 5000;
 const LOG_POLL_MS = 3000;
 const EVENTS_POLL_MS = 5000;
+const LOG_BOTTOM_THRESHOLD = 40;
+const PAGE_VIEWS = {
+    runtime: {
+        pageId: 'pageRuntime',
+        buttonId: 'btnPageRuntime'
+    },
+    tools: {
+        pageId: 'pageTools',
+        buttonId: 'btnPageTools'
+    },
+    logs: {
+        pageId: 'pageLogs',
+        buttonId: 'btnPageLogs'
+    }
+};
+const LOG_VIEWS = {
+    runtime: {
+        paneId: 'runtimeLogPane',
+        tabId: 'btnRuntimeTab'
+    },
+    events: {
+        paneId: 'eventsPane',
+        tabId: 'btnEventsTab'
+    }
+};
 
 initializeLocale();
 
 let isLoading = false;
-let statusInterval = null;
 let logInterval = null;
 let eventsInterval = null;
 let hasShownStatusError = false;
 let statusRequestInFlight = false;
 let logRequestInFlight = false;
 let eventsRequestInFlight = false;
-let runtimeLogText = '';
-let runtimeLogLoaded = false;
-let eventsData = [];
-let lastEventsPayload = '';
+const logState = {
+    runtime: {
+        text: '',
+        loaded: false,
+        scrolledUp: false
+    },
+    events: {
+        items: [],
+        lastPayload: '',
+        scrolledUp: false
+    }
+};
 let activePage = 'runtime';
 let activeLogView = 'runtime';
 let currentStatus = null;
@@ -38,7 +69,6 @@ let userListEntries = [];
 let userListLoaded = false;
 let userListRequestInFlight = false;
 let userListSnapshot = '';
-let userScrolledUp = false;
 let diagnosticsData = null;
 let diagnosticsExpanded = false;
 let privateDnsInputDirty = false;
@@ -88,6 +118,80 @@ function waitForPaint() {
     return new Promise((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(resolve));
     });
+}
+
+function isPaneNearBottom(pane) {
+    return pane.scrollHeight - pane.scrollTop - pane.clientHeight < LOG_BOTTOM_THRESHOLD;
+}
+
+function clampPaneScrollTop(pane, scrollTop) {
+    return Math.max(0, Math.min(scrollTop, pane.scrollHeight - pane.clientHeight));
+}
+
+function setPaneScrollTop(pane, scrollTop) {
+    const applyScroll = () => {
+        pane.scrollTop = clampPaneScrollTop(pane, scrollTop);
+    };
+
+    applyScroll();
+    requestAnimationFrame(applyScroll);
+}
+
+function scrollPaneToBottom(pane) {
+    const applyScroll = () => {
+        pane.scrollTop = pane.scrollHeight;
+    };
+
+    applyScroll();
+    requestAnimationFrame(applyScroll);
+}
+
+function getLogViewState(view = activeLogView) {
+    return logState[view];
+}
+
+function getLogPane(view = activeLogView) {
+    return document.getElementById(LOG_VIEWS[view].paneId);
+}
+
+function isLogViewScrolledUp(view = activeLogView) {
+    const state = getLogViewState(view);
+    return Boolean(state && state.scrolledUp);
+}
+
+function setLogViewScrolledUp(view, scrolledUp) {
+    const state = getLogViewState(view);
+    if (!state) return;
+    state.scrolledUp = scrolledUp;
+}
+
+function updatePaneContent(pane, nextContent, options = {}) {
+    const { html = false } = options;
+    const currentContent = html ? pane.innerHTML : pane.textContent;
+
+    if (currentContent === nextContent) {
+        return false;
+    }
+
+    if (html) {
+        pane.innerHTML = nextContent;
+    } else {
+        pane.textContent = nextContent;
+    }
+
+    return true;
+}
+
+function syncLogPaneScroll(view, pane, previousScrollTop, options = {}) {
+    const { forceBottom = false } = options;
+    const shouldStickToBottom = forceBottom || isPaneNearBottom(pane) || !isLogViewScrolledUp(view);
+
+    if (shouldStickToBottom) {
+        scrollPaneToBottom(pane);
+        setLogViewScrolledUp(view, false);
+    } else {
+        setPaneScrollTop(pane, previousScrollTop);
+    }
 }
 
 function showToast(message, params = {}, translate = true) {
@@ -313,6 +417,8 @@ function renderStatusCard() {
 
     document.getElementById('version').textContent = status.version || t('common.unknown');
     document.getElementById('pidBadge').textContent = pidCount > 1 ? `PID ${pid} +${pidCount - 1}` : `PID ${pid}`;
+    document.getElementById('networkModeLabel').textContent = getNetworkModeDisplayLabel(status);
+    document.getElementById('privateDnsLabel').textContent = getPrivateDnsDisplayLabel(status);
     document.getElementById('rulesV4').textContent = status.rules_v4 ?? 0;
     document.getElementById('rulesV6').textContent = status.rules_v6 ?? 0;
     document.getElementById('domainCount').textContent = formatNumber(status.domain_count ?? 0);
@@ -325,8 +431,7 @@ function renderStatusCard() {
     label.textContent = getStatusLabel();
 }
 
-function updateNetworkModeUi(status = currentStatus) {
-    const label = document.getElementById('networkModeLabel');
+function renderNetworkModeControls(status = currentStatus) {
     const dirtyNote = document.getElementById('networkModeDirtyNote');
     const saveButton = document.getElementById('btnSaveNetworkMode');
     const buttons = document.querySelectorAll('[data-network-mode]');
@@ -335,10 +440,6 @@ function updateNetworkModeUi(status = currentStatus) {
     const controlsDisabled = isLoading || !status;
     const autoUnavailable = Boolean(status && status.ipv6_available === false);
     const selectedAutoUnavailable = mode === 'auto' && autoUnavailable;
-
-    if (label) {
-        label.textContent = getNetworkModeDisplayLabel(status);
-    }
 
     if (dirtyNote) {
         if (!status) {
@@ -375,14 +476,18 @@ function showNetworkModeCheckingHint() {
     dirtyNote.classList.add('warning');
 }
 
-function refreshStatusAfterReturn() {
+function refreshStatusFromUiEvent() {
     if (isLoading) return;
     showNetworkModeCheckingHint();
     refreshStatus(true);
 }
 
-function updatePrivateDnsUi(status = currentStatus) {
-    const label = document.getElementById('privateDnsLabel');
+function handleWebUiActivated() {
+    refreshStatusFromUiEvent();
+    refreshActivePageData({ forceUserList: true });
+}
+
+function renderPrivateDnsControls(status = currentStatus) {
     const note = document.getElementById('privateDnsNote');
     const input = document.getElementById('privateDnsHostnameInput');
     const applyButton = document.getElementById('btnApplyPrivateDnsHostname');
@@ -391,10 +496,6 @@ function updatePrivateDnsUi(status = currentStatus) {
     const mode = status && status.private_dns_mode ? status.private_dns_mode : '';
     const hostname = status && status.private_dns_hostname ? status.private_dns_hostname : '';
     const controlsDisabled = isLoading || !status || status.private_dns_available === false;
-
-    if (label) {
-        label.textContent = getPrivateDnsDisplayLabel(status);
-    }
 
     if (note) {
         note.textContent = getPrivateDnsNote(status);
@@ -520,7 +621,7 @@ function setupPrivateDnsControls() {
     input.dataset.bound = '1';
     input.addEventListener('input', () => {
         privateDnsInputDirty = true;
-        updatePrivateDnsUi();
+        renderPrivateDnsControls();
     });
     input.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
@@ -532,54 +633,42 @@ function setupPrivateDnsControls() {
         if (!input.value.trim()) {
             privateDnsInputDirty = false;
         }
-        updatePrivateDnsUi();
+        renderPrivateDnsControls();
     });
 
-    updatePrivateDnsUi();
+    renderPrivateDnsControls();
 }
 
 function updatePageButtons() {
-    document.getElementById('btnPageRuntime').classList.toggle('active', activePage === 'runtime');
-    document.getElementById('btnPageTools').classList.toggle('active', activePage === 'tools');
-    document.getElementById('btnPageLogs').classList.toggle('active', activePage === 'logs');
+    Object.entries(PAGE_VIEWS).forEach(([page, config]) => {
+        document.getElementById(config.buttonId).classList.toggle('active', activePage === page);
+    });
 }
 
 function renderPages() {
-    document.getElementById('pageRuntime').classList.toggle('active', activePage === 'runtime');
-    document.getElementById('pageTools').classList.toggle('active', activePage === 'tools');
-    document.getElementById('pageLogs').classList.toggle('active', activePage === 'logs');
+    Object.entries(PAGE_VIEWS).forEach(([page, config]) => {
+        document.getElementById(config.pageId).classList.toggle('active', activePage === page);
+    });
     updatePageButtons();
-    updateLogPanelHeight();
     syncLogPolling();
 }
 
 async function setPage(page) {
     activePage = page;
     renderPages();
-
-    if (activePage === 'tools') {
-        await loadUserList();
-    } else if (activePage === 'logs') {
-        if (activeLogView === 'runtime') {
-            if (!runtimeLogLoaded) {
-                renderRuntimeLog(true);
-            }
-            await refreshLog();
-        } else {
-            await refreshEvents();
-        }
-    }
+    await refreshActivePageData();
 }
 
 function updateTabButtons() {
-    document.getElementById('btnEventsTab').classList.toggle('active', activeLogView === 'events');
-    document.getElementById('btnRuntimeTab').classList.toggle('active', activeLogView === 'runtime');
+    Object.entries(LOG_VIEWS).forEach(([view, config]) => {
+        document.getElementById(config.tabId).classList.toggle('active', activeLogView === view);
+    });
 }
 
 function updateLogMeta() {
     const meta = document.getElementById('logMeta');
     if (activeLogView === 'events') {
-        const count = eventsData.length;
+        const count = getLogViewState('events').items.length;
         meta.textContent = count ? tc('counts.events', count) : t('logs.event_history');
     } else {
         meta.textContent = t('logs.runtime_meta');
@@ -595,31 +684,31 @@ function updateStatusBar() {
     document.getElementById('logLiveSep').hidden = !isLive;
 
     if (activeLogView === 'runtime') {
-        if (runtimeLogLoaded) {
-            const lines = runtimeLogText ? runtimeLogText.split('\n').length : 0;
+        const runtimeState = getLogViewState('runtime');
+        if (runtimeState.loaded) {
+            const lines = runtimeState.text ? runtimeState.text.split('\n').length : 0;
             document.getElementById('logLineCount').textContent = tc('counts.lines', lines);
         } else {
             document.getElementById('logLineCount').textContent = '--';
         }
         clearButton.hidden = true;
-        jumpButton.classList.toggle('visible', userScrolledUp);
+        jumpButton.classList.toggle('visible', isLogViewScrolledUp('runtime'));
     } else {
-        document.getElementById('logLineCount').textContent = tc('counts.entries', eventsData.length);
+        document.getElementById('logLineCount').textContent = tc('counts.entries', getLogViewState('events').items.length);
         clearButton.hidden = false;
         jumpButton.classList.remove('visible');
     }
 }
 
 function renderEventsPane() {
-    const pane = document.getElementById('eventsPane');
-    if (!eventsData.length) {
-        pane.innerHTML = `<div class="events-empty">${esc(t('logs.events_empty'))}</div>`;
-        return;
-    }
-
-    const html = eventsData.map((evt) => {
-        const typeLower = (evt.type || '').toLowerCase();
-        return `<div class="event-item">
+    const pane = getLogPane('events');
+    const previousScrollTop = pane.scrollTop;
+    const items = getLogViewState('events').items;
+    const markup = !items.length
+        ? `<div class="events-empty">${esc(t('logs.events_empty'))}</div>`
+        : items.map((evt) => {
+            const typeLower = (evt.type || '').toLowerCase();
+            return `<div class="event-item">
             <div class="event-dot ${typeLower}"></div>
             <div class="event-body">
                 <div class="event-head">
@@ -629,12 +718,19 @@ function renderEventsPane() {
                 <div class="event-msg">${esc(evt.message)}</div>
             </div>
         </div>`;
-    }).join('');
-    pane.innerHTML = html;
+        }).join('');
+    const changed = updatePaneContent(pane, markup, { html: true });
 
-    if (!userScrolledUp) {
-        pane.scrollTop = pane.scrollHeight;
+    if (!items.length) {
+        setLogViewScrolledUp('events', false);
+        return;
     }
+
+    if (!changed) {
+        return;
+    }
+
+    syncLogPaneScroll('events', pane, previousScrollTop);
 }
 
 function getDiagnoseButtonMarkup(label) {
@@ -832,12 +928,13 @@ async function refreshEvents() {
         const raw = (res.stdout || '').trim();
         const arrMatch = raw.match(/\[[\s\S]*\]/);
         if (arrMatch) {
+            const eventsState = getLogViewState('events');
             const payload = arrMatch[0];
-            if (payload === lastEventsPayload) {
+            if (payload === eventsState.lastPayload) {
                 return;
             }
-            eventsData = JSON.parse(payload);
-            lastEventsPayload = payload;
+            eventsState.items = JSON.parse(payload);
+            eventsState.lastPayload = payload;
             if (activeLogView === 'events') {
                 renderEventsPane();
                 updateLogMeta();
@@ -851,20 +948,21 @@ async function refreshEvents() {
     }
 }
 
-function renderRuntimeLog(forceBottom = false) {
-    const pane = document.getElementById('runtimeLogPane');
-    const isNearBottom = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 40;
+function renderRuntimeLog(options = {}) {
+    const { forceBottom = false } = options;
+    const pane = getLogPane('runtime');
+    const previousScrollTop = pane.scrollTop;
+    const runtimeState = getLogViewState('runtime');
+    const nextText = !runtimeState.loaded
+        ? t('logs.loading_runtime')
+        : (runtimeState.text || t('logs.runtime_empty'));
+    const changed = updatePaneContent(pane, nextText);
 
-    if (!runtimeLogLoaded) {
-        pane.textContent = t('logs.loading_runtime');
-    } else {
-        pane.textContent = runtimeLogText || t('logs.runtime_empty');
+    if (!changed && !forceBottom) {
+        return;
     }
 
-    if (forceBottom || isNearBottom) {
-        pane.scrollTop = pane.scrollHeight;
-        userScrolledUp = false;
-    }
+    syncLogPaneScroll('runtime', pane, previousScrollTop, { forceBottom });
 }
 
 async function refreshLog() {
@@ -874,8 +972,9 @@ async function refreshLog() {
     logRequestInFlight = true;
     try {
         const res = await exec(`tail -n 80 ${MODDIR}/nzapret.log 2>/dev/null`);
-        runtimeLogText = String(res.stdout || '').replace(/\r/g, '').trim();
-        runtimeLogLoaded = true;
+        const runtimeState = getLogViewState('runtime');
+        runtimeState.text = String(res.stdout || '').replace(/\r/g, '').trim();
+        runtimeState.loaded = true;
         renderRuntimeLog();
         updateStatusBar();
     } finally {
@@ -884,62 +983,42 @@ async function refreshLog() {
 }
 
 function setupScrollTracking() {
-    const runtimePane = document.getElementById('runtimeLogPane');
-    const eventsPane = document.getElementById('eventsPane');
-
-    function onScroll(pane) {
-        const nearBottom = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 40;
-        userScrolledUp = !nearBottom;
-        document.getElementById('logJumpBtn').classList.toggle('visible', activeLogView === 'runtime' && userScrolledUp);
+    function onScroll(view) {
+        const pane = getLogPane(view);
+        const scrolledUp = !isPaneNearBottom(pane);
+        setLogViewScrolledUp(view, scrolledUp);
+        updateStatusBar();
     }
 
-    runtimePane.addEventListener('scroll', () => onScroll(runtimePane));
-    eventsPane.addEventListener('scroll', () => onScroll(eventsPane));
+    Object.keys(LOG_VIEWS).forEach((view) => {
+        getLogPane(view).addEventListener('scroll', () => onScroll(view));
+    });
 }
 
 function jumpToBottom() {
-    const activePane = activeLogView === 'events'
-        ? document.getElementById('eventsPane')
-        : document.getElementById('runtimeLogPane');
-    activePane.scrollTop = activePane.scrollHeight;
-    userScrolledUp = false;
-    document.getElementById('logJumpBtn').classList.remove('visible');
+    const activePane = getLogPane(activeLogView);
+    scrollPaneToBottom(activePane);
+    setLogViewScrolledUp(activeLogView, false);
+    updateStatusBar();
 }
 
 function renderLogView() {
-    const eventsPane = document.getElementById('eventsPane');
-    const runtimePane = document.getElementById('runtimeLogPane');
-
-    eventsPane.classList.toggle('active', activeLogView === 'events');
-    runtimePane.classList.toggle('active', activeLogView === 'runtime');
+    Object.entries(LOG_VIEWS).forEach(([view, config]) => {
+        document.getElementById(config.paneId).classList.toggle('active', activeLogView === view);
+    });
     updateTabButtons();
     updateLogMeta();
     updateStatusBar();
-    updateLogPanelHeight();
-    userScrolledUp = false;
-    document.getElementById('logJumpBtn').classList.remove('visible');
 }
 
-function updateLogPanelHeight() {
-    const panels = document.querySelector('#pageLogs .log-panels');
-    const statusBar = document.getElementById('logStatusBar');
-    const card = document.querySelector('#pageLogs .card');
-    const nav = document.querySelector('.page-nav');
-    if (!panels || !statusBar || !card) return;
+function rerenderLogsUi() {
+    renderRuntimeLog();
+    renderEventsPane();
+    renderLogView();
+}
 
-    if (activePage !== 'logs') {
-        panels.style.removeProperty('height');
-        return;
-    }
-
-    const viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-    const cardStyles = getComputedStyle(card);
-    const panelsTop = panels.getBoundingClientRect().top;
-    const navTop = nav ? nav.getBoundingClientRect().top : viewportHeight;
-    const safeBottom = Math.min(viewportHeight, navTop) - 12;
-    const cardBottomExtra = (parseFloat(cardStyles.paddingBottom) || 0) + (parseFloat(cardStyles.marginBottom) || 0);
-    const available = Math.floor(safeBottom - panelsTop - statusBar.offsetHeight - cardBottomExtra - 4);
-    panels.style.height = `${Math.max(96, available)}px`;
+async function refreshToolsPageData(force = false) {
+    await loadUserList(force);
 }
 
 function syncLogPolling() {
@@ -956,19 +1035,37 @@ function syncLogPolling() {
     }
 }
 
-async function setLogView(view) {
-    activeLogView = view;
-    renderLogView();
-    syncLogPolling();
+async function refreshActiveLogView() {
+    if (activePage !== 'logs') return;
 
-    if (view === 'runtime') {
-        if (!runtimeLogLoaded) {
-            renderRuntimeLog(true);
+    if (activeLogView === 'runtime') {
+        if (!getLogViewState('runtime').loaded) {
+            renderRuntimeLog({ forceBottom: true });
         }
         await refreshLog();
     } else {
         await refreshEvents();
     }
+}
+
+async function refreshActivePageData(options = {}) {
+    const { forceUserList = false } = options;
+
+    if (activePage === 'tools') {
+        await refreshToolsPageData(forceUserList);
+        return;
+    }
+
+    if (activePage === 'logs') {
+        await refreshActiveLogView();
+    }
+}
+
+async function setLogView(view) {
+    activeLogView = view;
+    renderLogView();
+    syncLogPolling();
+    await refreshActiveLogView();
 }
 
 async function runDiagnose() {
@@ -1001,33 +1098,33 @@ async function runDiagnose() {
     }
 }
 
-function updateActionButtons(isOn) {
-    if (isLoading) {
-        updateNetworkModeUi();
-        updatePrivateDnsUi();
-        updateUserListEditorState();
-        return;
-    }
+function renderRuntimeActionButtons(isOn) {
+    if (isLoading) return;
+
     document.getElementById('btnStart').classList.toggle('disabled', isOn);
     document.getElementById('btnStop').classList.toggle('disabled', !isOn);
     document.getElementById('btnRestart').classList.toggle('disabled', !isOn);
     document.getElementById('btnUpdate').classList.remove('disabled');
-    updateNetworkModeUi();
-    updatePrivateDnsUi();
+}
+
+function renderRuntimePageUi(status = currentStatus) {
+    renderStatusCard();
+    renderRuntimeActionButtons(Boolean(status && status.active));
+}
+
+function renderToolsPageUi(status = currentStatus) {
+    renderNetworkModeControls(status);
+    renderPrivateDnsControls(status);
     updateUserListEditorState();
+    rerenderDiagnoseButton();
+    renderDiagnosticsPanel();
 }
 
 function applyUnavailableState() {
     currentStatus = null;
     statusViewState = 'unavailable';
-    renderStatusCard();
-
-    if (!isLoading) {
-        updateActionButtons(false);
-    }
-    updateNetworkModeUi(null);
-    updatePrivateDnsUi(null);
-    updateUserListEditorState();
+    renderRuntimePageUi(null);
+    renderToolsPageUi(null);
 }
 
 async function runCli(args, options = {}) {
@@ -1058,13 +1155,7 @@ async function runCli(args, options = {}) {
             }
             if (refresh) {
                 await refreshStatus(true);
-                if (activePage === 'logs') {
-                    if (activeLogView === 'events') {
-                        await refreshEvents();
-                    } else {
-                        await refreshLog();
-                    }
-                }
+                await refreshActiveLogView();
             }
         } else {
             showToast('generic.error_with_message', {
@@ -1081,17 +1172,9 @@ async function runCli(args, options = {}) {
     } finally {
         isLoading = false;
         setUiLocked(false);
-        updateActionButtons(Boolean(currentStatus && currentStatus.active));
+        renderRuntimePageUi();
+        renderToolsPageUi();
     }
-}
-
-function startStatusPolling() {
-    if (statusInterval) clearInterval(statusInterval);
-    statusInterval = setInterval(() => {
-        if (!document.hidden) {
-            refreshStatus();
-        }
-    }, STATUS_POLL_MS);
 }
 
 function startLogPolling() {
@@ -1128,20 +1211,22 @@ function stopEventsPolling() {
     }
 }
 
-function rerenderLocalizedUi() {
+function rerenderBaseUi() {
     applyStaticTranslations(document, getStaticTranslationParams());
     updateLocaleButtons();
-    renderStatusCard();
-    updateNetworkModeUi(currentStatus);
-    updatePrivateDnsUi(currentStatus);
-    updateUserListEditorState();
-    rerenderDiagnoseButton();
-    renderRuntimeLog();
-    renderEventsPane();
-    renderDiagnosticsPanel();
-    renderLogView();
     rerenderUiLock();
     rerenderToast();
+}
+
+function rerenderNonLogUi() {
+    rerenderBaseUi();
+    renderRuntimePageUi();
+    renderToolsPageUi();
+}
+
+function rerenderAppUi() {
+    rerenderNonLogUi();
+    rerenderLogsUi();
 }
 
 async function refreshStatus(force = false) {
@@ -1160,8 +1245,7 @@ async function refreshStatus(force = false) {
         currentStatus = JSON.parse(jsonMatch[0]);
         statusViewState = 'ready';
         hasShownStatusError = false;
-        rerenderLocalizedUi();
-        updateActionButtons(Boolean(currentStatus.active));
+        rerenderNonLogUi();
     } catch (error) {
         applyUnavailableState();
         if (!hasShownStatusError) {
@@ -1231,7 +1315,7 @@ async function setNetworkMode(mode) {
         networkModeDraft = mode;
     }
 
-    updateNetworkModeUi(currentStatus);
+    renderNetworkModeControls(currentStatus);
 }
 
 async function saveNetworkMode() {
@@ -1268,13 +1352,7 @@ async function saveNetworkMode() {
 
         networkModeDraft = '';
         await refreshStatus(true);
-        if (activePage === 'logs') {
-            if (activeLogView === 'events') {
-                await refreshEvents();
-            } else {
-                await refreshLog();
-            }
-        }
+        await refreshActiveLogView();
         showToast(shouldRestart ? 'network.saved_restart' : 'network.saved');
     } catch (error) {
         if (savedMode) {
@@ -1287,7 +1365,8 @@ async function saveNetworkMode() {
     } finally {
         isLoading = false;
         setUiLocked(false);
-        updateActionButtons(Boolean(currentStatus && currentStatus.active));
+        renderRuntimePageUi();
+        renderToolsPageUi();
     }
 }
 
@@ -1306,7 +1385,7 @@ async function setPrivateDnsMode(mode) {
     });
     if (result.ok) {
         privateDnsInputDirty = false;
-        updatePrivateDnsUi(currentStatus);
+        renderPrivateDnsControls(currentStatus);
     }
 }
 
@@ -1325,7 +1404,7 @@ async function setPrivateDnsDefault() {
     });
     if (result.ok) {
         privateDnsInputDirty = false;
-        updatePrivateDnsUi(currentStatus);
+        renderPrivateDnsControls(currentStatus);
     }
 }
 
@@ -1338,13 +1417,13 @@ async function applyPrivateDnsHostname() {
     const hostname = input.value.trim().toLowerCase();
     if (!isValidPrivateDnsHostname(hostname)) {
         showToast('private_dns.invalid_hostname');
-        updatePrivateDnsUi(currentStatus);
+        renderPrivateDnsControls(currentStatus);
         return;
     }
 
     if (currentStatus.private_dns_mode === 'hostname' && currentStatus.private_dns_hostname === hostname) {
         privateDnsInputDirty = false;
-        updatePrivateDnsUi(currentStatus);
+        renderPrivateDnsControls(currentStatus);
         return;
     }
 
@@ -1354,7 +1433,7 @@ async function applyPrivateDnsHostname() {
     });
     if (result.ok) {
         privateDnsInputDirty = false;
-        updatePrivateDnsUi(currentStatus);
+        renderPrivateDnsControls(currentStatus);
     }
 }
 
@@ -1476,8 +1555,10 @@ async function clearEventsLog() {
             throw new Error((res.stderr || res.stdout || 'events clear failed').trim());
         }
 
-        eventsData = [];
-        lastEventsPayload = '[]';
+        const eventsState = getLogViewState('events');
+        eventsState.items = [];
+        eventsState.lastPayload = '[]';
+        setLogViewScrolledUp('events', false);
         renderEventsPane();
         updateLogMeta();
         updateStatusBar();
@@ -1493,7 +1574,7 @@ async function clearEventsLog() {
 
 function changeLocale(locale) {
     setI18nLocale(locale);
-    rerenderLocalizedUi();
+    rerenderAppUi();
 }
 
 function setupLocaleControls() {
@@ -1509,26 +1590,10 @@ function setupLocaleControls() {
 
 document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
-        refreshStatusAfterReturn();
-        if (activePage === 'tools') {
-            loadUserList(true);
-        }
-        if (activePage === 'logs') {
-            if (activeLogView === 'runtime') {
-                refreshLog();
-            } else {
-                refreshEvents();
-            }
-        }
+        handleWebUiActivated();
     }
     syncLogPolling();
 });
-
-window.addEventListener('focus', refreshStatusAfterReturn);
-window.addEventListener('resize', updateLogPanelHeight);
-if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', updateLogPanelHeight);
-}
 
 window.doAction = doAction;
 window.setPage = setPage;
@@ -1551,7 +1616,6 @@ setupLocaleControls();
 setupScrollTracking();
 setupUserListEditor();
 setupPrivateDnsControls();
-rerenderLocalizedUi();
-startStatusPolling();
+rerenderAppUi();
 renderPages();
 refreshStatus();

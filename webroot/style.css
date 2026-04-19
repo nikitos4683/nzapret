@@ -33,6 +33,13 @@
     --radius: 16px;
     --radius-sm: 12px;
     --radius-xs: 8px;
+
+    /* Layout dimensions */
+    --body-pad-top: 20px;
+    --body-pad-bottom: 16px;
+    --body-pad-x: 16px;
+    --nav-block: 70px;      /* page-nav height + bottom gap */
+    --nav-gap: 14px;        /* gap between page-nav and viewport bottom */
 }
 
 /* --- Light theme --- */
@@ -85,18 +92,25 @@ body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     background: var(--bg-primary);
     color: var(--text-primary);
-    min-height: 100vh;
-    overflow-x: hidden;
-    /* Use KSU inset variables with safe fallbacks */
-    padding: 20px 16px 32px;
-    padding-top: calc(20px + var(--window-inset-top, 0px));
-    padding-bottom: calc(16px + var(--window-inset-bottom, 0px));
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    /* KSU inset variables with safe fallbacks; no bottom padding — pages handle nav clearance */
+    padding: var(--body-pad-top) var(--body-pad-x) 0;
+    padding-top: calc(var(--body-pad-top) + var(--window-inset-top, 0px));
 }
 
 .container {
     max-width: 460px;
+    width: 100%;
     margin: 0 auto;
     position: relative;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
 }
 
 .ui-lock {
@@ -252,7 +266,7 @@ body.ui-busy .icon-btn {
 .page-nav {
     position: fixed;
     left: 50%;
-    bottom: calc(14px + var(--window-inset-bottom, 0px));
+    bottom: calc(var(--nav-gap) + var(--window-inset-bottom, 0px));
     transform: translateX(-50%);
     width: min(460px, calc(100vw - 24px));
     z-index: 120;
@@ -310,7 +324,13 @@ body.ui-busy .icon-btn {
 }
 
 .page.active {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding-bottom: calc(var(--nav-block) + var(--body-pad-bottom) + var(--window-inset-bottom, 0px));
     animation: pageIn 0.18s ease;
 }
 
@@ -1056,7 +1076,9 @@ body.ui-busy .icon-btn {
 .log-panels {
     position: relative;
     display: flex;
+    flex: 1 1 0;
     min-height: 0;
+    overflow: hidden;
 }
 
 .log-pane {
@@ -1072,7 +1094,6 @@ body.ui-busy .icon-btn {
     font-size: 11px;
     line-height: 1.7;
     color: var(--text-secondary);
-    height: 100%;
     min-height: 0;
     overflow-y: auto;
     white-space: pre-wrap;
@@ -1095,7 +1116,6 @@ body.ui-busy .icon-btn {
     background: var(--bg-code);
     border-radius: var(--radius-xs) var(--radius-xs) 0 0;
     padding: 8px;
-    height: 100%;
     min-height: 0;
     overflow-y: auto;
     border: 1px solid var(--border);
@@ -1203,16 +1223,22 @@ body.ui-busy .icon-btn {
     color: var(--text-tertiary);
 }
 
+/* Logs: no page-level scroll — panels scroll internally */
+#pageLogs.active {
+    overflow: hidden;
+}
+
 #pageLogs > .card {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1 1 0;
     margin-bottom: 0;
+    overflow: hidden;
 }
 
 #pageRuntime > .actions:last-child {
     margin-bottom: 0;
-}
-
-#pageTools {
-    padding-bottom: calc(88px + var(--window-inset-bottom, 0px));
 }
 
 .log-live-dot {
@@ -1594,7 +1620,7 @@ body.ui-busy .icon-btn {
 /* --- Toast --- */
 .toast {
     position: fixed;
-    bottom: calc(96px + var(--window-inset-bottom, 0px));
+    bottom: calc(var(--nav-block) + var(--nav-gap) + var(--window-inset-bottom, 0px));
     left: 50%;
     transform: translateX(-50%) translateY(16px);
     background: var(--bg-card-hover);
