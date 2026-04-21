@@ -137,10 +137,7 @@ set_execution_permissions() {
     for file in "${EXECUTABLE_PATHS[@]}"; do
         chmod +x "$STAGE_DIR/$file" 2>/dev/null || true
     done
-    for bin_file in "$STAGE_DIR"/bin/*; do
-        [ -e "$bin_file" ] || continue
-        chmod +x "$bin_file" 2>/dev/null || true
-    done
+    find "$STAGE_DIR/bin" -type f -exec chmod +x {} + 2>/dev/null || true
 }
 
 create_zip_archive() {

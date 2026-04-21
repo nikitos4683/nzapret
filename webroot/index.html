@@ -50,36 +50,59 @@
                     <div class="status-badge" id="pidBadge">PID --</div>
                 </div>
                 <div class="status-grid">
-                    <div class="status-item">
-                        <span class="status-item-label" data-i18n="status.labels.network_mode">Сетевой режим</span>
-                        <span class="status-item-value" id="networkModeLabel">--</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-item-label" data-i18n="status.labels.private_dns">Частный DNS</span>
-                        <span class="status-item-value" id="privateDnsLabel">--</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-item-label" data-i18n="status.labels.domains">Домены</span>
-                        <span class="status-item-value" id="domainCount">0</span>
-                    </div>
-                    <div class="status-pair-row">
-                        <div class="status-pair-item">
-                            <span class="status-pair-label" data-i18n="status.labels.google_domains">Google домены</span>
-                            <span class="status-pair-value" id="googleDomainCount">0</span>
+                    <div class="status-column">
+                        <div class="status-column-title" data-i18n="status.sections.module">Модуль</div>
+                        <div class="status-item">
+                            <span class="status-item-label" data-i18n="status.labels.network_mode">Сетевой режим</span>
+                            <span class="status-item-value" id="networkModeLabel">--</span>
                         </div>
-                        <div class="status-pair-item">
-                            <span class="status-pair-label" data-i18n="status.labels.personal_domains">Личные домены</span>
-                            <span class="status-pair-value" id="userDomainCount">0</span>
+                        <div class="status-item">
+                            <span class="status-item-label" data-i18n="status.labels.private_dns">Частный DNS</span>
+                            <span class="status-item-value" id="privateDnsLabel">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-item-label" data-i18n="status.labels.domains">Домены</span>
+                            <span class="status-item-value" id="domainCount">0</span>
+                        </div>
+                        <div class="status-pair-row">
+                            <div class="status-pair-item">
+                                <span class="status-pair-label" data-i18n="status.labels.google_domains">Google домены</span>
+                                <span class="status-pair-value" id="googleDomainCount">0</span>
+                            </div>
+                            <div class="status-pair-item">
+                                <span class="status-pair-label" data-i18n="status.labels.personal_domains">Личные домены</span>
+                                <span class="status-pair-value" id="userDomainCount">0</span>
+                            </div>
+                        </div>
+                        <div class="status-pair-row">
+                            <div class="status-pair-item">
+                                <span class="status-pair-label" data-i18n="status.labels.ipv4_rules">Правила IPv4</span>
+                                <span class="status-pair-value" id="rulesV4">0</span>
+                            </div>
+                            <div class="status-pair-item">
+                                <span class="status-pair-label" data-i18n="status.labels.ipv6_rules">Правила IPv6</span>
+                                <span class="status-pair-value" id="rulesV6">0</span>
+                            </div>
                         </div>
                     </div>
-                    <div class="status-pair-row">
-                        <div class="status-pair-item">
-                            <span class="status-pair-label" data-i18n="status.labels.ipv4_rules">Правила IPv4</span>
-                            <span class="status-pair-value" id="rulesV4">0</span>
+
+                    <div class="status-column">
+                        <div class="status-column-title" data-i18n="status.sections.tgwsproxy">tgwsproxy</div>
+                        <div class="status-item">
+                            <span class="status-item-label" data-i18n="tg_runtime.labels.state">Состояние</span>
+                            <span class="status-item-value" id="tgRuntimeStateValue">--</span>
                         </div>
-                        <div class="status-pair-item">
-                            <span class="status-pair-label" data-i18n="status.labels.ipv6_rules">Правила IPv6</span>
-                            <span class="status-pair-value" id="rulesV6">0</span>
+                        <div class="status-item">
+                            <span class="status-item-label" data-i18n="tg_runtime.labels.helper">Helper</span>
+                            <span class="status-item-value" id="tgHelperValue">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-item-label" data-i18n="tg_runtime.labels.listen">Listen</span>
+                            <span class="status-item-value" id="tgListenValue">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-item-label" data-i18n="tg_runtime.labels.fallback">Fallback</span>
+                            <span class="status-item-value" id="tgCfValue">--</span>
                         </div>
                     </div>
                 </div>
@@ -111,9 +134,32 @@
                     <span data-i18n="actions.update">Обновить</span>
                 </button>
             </div>
+
         </div>
 
         <div class="page" id="pageTools">
+            <div class="card" id="tgLinkCard">
+                <div class="panel-head">
+                    <div>
+                        <div class="panel-title" data-i18n="tg_link.title">tgwsproxy link</div>
+                        <div class="panel-subtitle" data-i18n="tg_link.subtitle">Получите текущую tg:// ссылку из встроенного tgwsproxy.</div>
+                    </div>
+                    <div class="panel-actions">
+                        <button class="icon-btn" id="btnReloadTgLink" type="button" onclick="reloadTgLink()" data-i18n="common.reload">Обновить</button>
+                        <button class="icon-btn primary" id="btnCopyTgLink" type="button" onclick="copyTgLink()" data-i18n="common.copy">Скопировать</button>
+                    </div>
+                </div>
+
+                <div class="tg-link-shell">
+                    <div class="tg-link-label" data-i18n="tg_link.link_label">tg:// link</div>
+                    <div class="tg-link-value" id="tgLinkValue">tg://proxy?...</div>
+                </div>
+
+                <div class="tools-support-line" id="tgLinkNote" data-i18n="tg_link.note_initial">
+                    Ссылка tgwsproxy появится здесь после первого обновления.
+                </div>
+            </div>
+
             <div class="card" id="userListCard">
                 <div class="panel-head">
                     <div>

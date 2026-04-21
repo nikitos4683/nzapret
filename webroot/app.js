@@ -72,6 +72,12 @@ let userListSnapshot = '';
 let diagnosticsData = null;
 let diagnosticsExpanded = false;
 let privateDnsInputDirty = false;
+const tgLinkState = {
+    value: '',
+    loaded: false,
+    loading: false,
+    error: ''
+};
 let toastTimer = null;
 let toastState = null;
 let uiLockState = {
@@ -389,6 +395,195 @@ function getPrivateDnsNote(status = currentStatus) {
     }
 }
 
+function getTgStatus(status = currentStatus) {
+    return status && status.tg ? status.tg : null;
+}
+
+function getTgRuntime(status = currentStatus) {
+    const tg = getTgStatus(status);
+    return tg && tg.runtime ? tg.runtime : null;
+}
+
+function getTgRuntimeStateLabel(status = currentStatus) {
+    const tg = getTgStatus(status);
+    const runtime = getTgRuntime(status);
+
+    if (!tg) return '--';
+    if (!tg.binary_exists) return t('tg_runtime.missing');
+    if (runtime && runtime.active) return t('tg_runtime.running');
+    if (runtime && runtime.status === 'error') return t('tg_runtime.error');
+    return t('tg_runtime.stopped');
+}
+
+function getTgHelperLabel(status = currentStatus) {
+    const tg = getTgStatus(status);
+
+    if (!tg) return '--';
+    return tg.binary_exists ? t('tg_runtime.helper_builtin') : t('tg_runtime.helper_missing');
+}
+
+function getTgListenLabel(status = currentStatus) {
+    const runtime = getTgRuntime(status);
+    return runtime && runtime.listen ? runtime.listen : '--';
+}
+
+function getTgCfLabel(status = currentStatus) {
+    const runtime = getTgRuntime(status);
+    if (!runtime) {
+        return '--';
+    }
+    if (!runtime.cfproxy) {
+        return t('tg_runtime.cf_disabled');
+    }
+
+    const priority = runtime.cfproxy_priority
+        ? t('tg_runtime.cf_first')
+        : t('tg_runtime.tcp_first');
+    const domain = runtime.cfproxy_domain || t('tg_runtime.cf_auto');
+    return `${priority} · ${domain}`;
+}
+
+function extractTelegramProxyLink(output) {
+    const match = String(output || '').match(/tg:\/\/proxy\?[^\s]+/);
+    return match ? match[0] : '';
+}
+
+function getTgLinkValue() {
+    if (tgLinkState.value) {
+        return tgLinkState.value;
+    }
+    return t('tg_link.placeholder');
+}
+
+function getTgLinkNote(status = currentStatus) {
+    const tg = getTgStatus(status);
+
+    if (tgLinkState.loading) {
+        return t('tg_link.note_loading');
+    }
+    if (tg && tg.binary_exists === false) {
+        return t('tg_link.note_missing');
+    }
+    if (tgLinkState.error) {
+        return t('tg_link.note_error', { message: tgLinkState.error });
+    }
+    if (tgLinkState.value) {
+        return t('tg_link.note_ready');
+    }
+    return t('tg_link.note_initial');
+}
+
+function renderTgLinkCard(status = currentStatus) {
+    const valueNode = document.getElementById('tgLinkValue');
+    const noteNode = document.getElementById('tgLinkNote');
+    const copyButton = document.getElementById('btnCopyTgLink');
+    const reloadButton = document.getElementById('btnReloadTgLink');
+
+    if (!valueNode || !noteNode || !copyButton || !reloadButton) {
+        return;
+    }
+
+    valueNode.textContent = getTgLinkValue();
+    noteNode.textContent = getTgLinkNote(status);
+    noteNode.classList.toggle('warning', Boolean(tgLinkState.error) || Boolean(status && status.tg && status.tg.binary_exists === false));
+
+    setButtonDisabled(copyButton, !tgLinkState.value || tgLinkState.loading);
+    setButtonDisabled(reloadButton, tgLinkState.loading);
+}
+
+async function loadTgLink(force = false, options = {}) {
+    const { notify = false } = options;
+
+    if (tgLinkState.loading) {
+        return Boolean(tgLinkState.value);
+    }
+    if (!force && tgLinkState.loaded) {
+        return Boolean(tgLinkState.value);
+    }
+
+    tgLinkState.loading = true;
+    tgLinkState.error = '';
+    renderToolsPageUi();
+
+    try {
+        const res = await exec(`${CLI} tg link`);
+        const stdout = (res.stdout || '').trim();
+        const stderr = (res.stderr || '').trim();
+        const combined = [stdout, stderr].filter(Boolean).join('\n');
+        const link = extractTelegramProxyLink(combined);
+
+        if (res.errno !== 0 || !link) {
+            throw new Error(combined || 'tg link command failed');
+        }
+
+        tgLinkState.value = link;
+        tgLinkState.loaded = true;
+        tgLinkState.error = '';
+
+        if (notify) {
+            showToast('tg_link.reloaded');
+        }
+        return true;
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        tgLinkState.value = '';
+        tgLinkState.loaded = true;
+        tgLinkState.error = message;
+
+        if (notify) {
+            showToast('tg_link.load_failed', { message });
+        }
+        return false;
+    } finally {
+        tgLinkState.loading = false;
+        renderToolsPageUi();
+    }
+}
+
+async function copyTextToClipboard(text) {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(text);
+        return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', 'readonly');
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-1000px';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    try {
+        const copied = document.execCommand('copy');
+        if (!copied) {
+            throw new Error('copy command rejected');
+        }
+    } finally {
+        document.body.removeChild(textarea);
+    }
+}
+
+async function reloadTgLink() {
+    await loadTgLink(true, { notify: true });
+}
+
+async function copyTgLink() {
+    if (!tgLinkState.value || tgLinkState.loading) {
+        return;
+    }
+
+    try {
+        await copyTextToClipboard(tgLinkState.value);
+        showToast('tg_link.copied');
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        showToast('tg_link.copy_failed', { message });
+    }
+}
+
 function renderStatusCard() {
     const card = document.getElementById('statusCard');
     const dot = document.getElementById('statusDot');
@@ -398,6 +593,10 @@ function renderStatusCard() {
         document.getElementById('pidBadge').textContent = 'PID --';
         document.getElementById('networkModeLabel').textContent = '--';
         document.getElementById('privateDnsLabel').textContent = '--';
+        document.getElementById('tgRuntimeStateValue').textContent = '--';
+        document.getElementById('tgHelperValue').textContent = '--';
+        document.getElementById('tgListenValue').textContent = '--';
+        document.getElementById('tgCfValue').textContent = '--';
         document.getElementById('rulesV4').textContent = '?';
         document.getElementById('rulesV6').textContent = '?';
         document.getElementById('domainCount').textContent = '?';
@@ -419,6 +618,10 @@ function renderStatusCard() {
     document.getElementById('pidBadge').textContent = pidCount > 1 ? `PID ${pid} +${pidCount - 1}` : `PID ${pid}`;
     document.getElementById('networkModeLabel').textContent = getNetworkModeDisplayLabel(status);
     document.getElementById('privateDnsLabel').textContent = getPrivateDnsDisplayLabel(status);
+    document.getElementById('tgRuntimeStateValue').textContent = getTgRuntimeStateLabel(status);
+    document.getElementById('tgHelperValue').textContent = getTgHelperLabel(status);
+    document.getElementById('tgListenValue').textContent = getTgListenLabel(status);
+    document.getElementById('tgCfValue').textContent = getTgCfLabel(status);
     document.getElementById('rulesV4').textContent = status.rules_v4 ?? 0;
     document.getElementById('rulesV6').textContent = status.rules_v6 ?? 0;
     document.getElementById('domainCount').textContent = formatNumber(status.domain_count ?? 0);
@@ -1018,7 +1221,10 @@ function rerenderLogsUi() {
 }
 
 async function refreshToolsPageData(force = false) {
-    await loadUserList(force);
+    await Promise.all([
+        loadUserList(force),
+        loadTgLink(force)
+    ]);
 }
 
 function syncLogPolling() {
@@ -1113,6 +1319,7 @@ function renderRuntimePageUi(status = currentStatus) {
 }
 
 function renderToolsPageUi(status = currentStatus) {
+    renderTgLinkCard(status);
     renderNetworkModeControls(status);
     renderPrivateDnsControls(status);
     updateUserListEditorState();
@@ -1611,6 +1818,8 @@ window.runDiagnose = runDiagnose;
 window.toggleDiagnosticsDetails = toggleDiagnosticsDetails;
 window.clearDiagnostics = clearDiagnostics;
 window.jumpToBottom = jumpToBottom;
+window.reloadTgLink = reloadTgLink;
+window.copyTgLink = copyTgLink;
 
 setupLocaleControls();
 setupScrollTracking();

@@ -451,6 +451,23 @@ body.ui-busy .icon-btn {
     gap: 10px;
 }
 
+.status-column {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+}
+
+.status-column-title {
+    padding: 0 2px 1px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    line-height: 1.2;
+    text-transform: uppercase;
+}
+
 .status-item,
 .status-pair-item {
     background: var(--bg-input);
@@ -491,6 +508,11 @@ body.ui-busy .icon-btn {
     gap: 10px;
 }
 
+.status-column .status-pair-row {
+    grid-column: auto;
+    gap: 8px;
+}
+
 .status-pair-item {
     padding: 10px 12px;
     display: flex;
@@ -512,6 +534,23 @@ body.ui-busy .icon-btn {
 .status-pair-value {
     white-space: nowrap;
     flex-shrink: 0;
+}
+
+.status-column .status-item-value,
+.status-column .status-pair-value {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.status-column .status-pair-item {
+    align-items: flex-start;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 4px;
+}
+
+.status-column .status-pair-value {
+    white-space: normal;
 }
 
 /* --- Action buttons --- */
@@ -752,6 +791,33 @@ body.ui-busy .icon-btn {
 
 .tools-support-line.warning {
     color: var(--orange);
+}
+
+.tg-link-shell {
+    margin-top: 2px;
+    padding: 12px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: var(--bg-code);
+}
+
+.tg-link-label {
+    font-size: 10px;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-weight: 600;
+}
+
+.tg-link-value {
+    margin-top: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-primary);
+    word-break: break-all;
+    user-select: text;
+    -webkit-user-select: text;
 }
 
 /* --- Personal list editor --- */
@@ -1560,6 +1626,15 @@ body.ui-busy .icon-btn {
     }
 
     .status-grid {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 8px;
+    }
+
+    .status-column {
+        gap: 8px;
+    }
+
+    .status-column .status-pair-row {
         grid-template-columns: 1fr;
     }
 

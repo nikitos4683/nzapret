@@ -13,7 +13,13 @@ PAYLOADS="$MODDIR/payloads"
 LUA_DIR="$MODDIR/lua"
 PAYLOAD_QUIC_FILE="$PAYLOADS/quic_initial_www_google_com.bin"
 PAYLOAD_TLS_FILE="$PAYLOADS/tls_clienthello_www_google_com.bin"
-BIN="$MODDIR/bin/nfqws2"
+BIN="$MODDIR/bin/nfqws2/nfqws2"
+TG_DIR="$MODDIR/tg"
+TGWSPROXY_BIN="$MODDIR/bin/tgwsproxy/tgwsproxy"
+TGWSPROXY_CONFIG_FILE="$TG_DIR/config.json"
+TGWSPROXY_PID_FILE="$TG_DIR/tgwsproxy.pid"
+TGWSPROXY_LOGFILE="$TG_DIR/tgwsproxy.log"
+TGWSPROXY_CONN_LOGFILE="$TG_DIR/connections.log"
 CHAIN="nzapret_out"
 LOGFILE="$MODDIR/nzapret.log"
 EVENTLOG="$MODDIR/nzapret-events.log"
@@ -29,9 +35,14 @@ DEFAULT_LIST_SOURCE="https://raw.githubusercontent.com/bol-van/rulist/refs/heads
 DEFAULT_PRIVATE_DNS_HOSTNAME="xbox-dns.ru"
 
 # Helpers
+
+# Initializes required module directories and files if they are missing.
+# Avoids failing hard if the filesystem is unexpectedly read-only.
 ensure_runtime_layout() {
     mkdir -p "$PROFILE_DIR" >/dev/null 2>&1
     mkdir -p "$LISTS" >/dev/null 2>&1
+    mkdir -p "$TG_DIR" >/dev/null 2>&1
+    rm -f "$TG_DIR/disabled" >/dev/null 2>&1 || true
     [ -f "$USER_LIST_FILE" ] || : > "$USER_LIST_FILE" 2>/dev/null
 }
 
@@ -70,6 +81,8 @@ ipv6_network_available() {
     ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1
 }
 
+# Determines the safest default network mode for the current device state.
+# Auto if IPv6 works, IPv4-only otherwise.
 detect_default_network_mode() {
     if ipv6_network_available; then
         echo "auto"
@@ -78,6 +91,8 @@ detect_default_network_mode() {
     echo "ipv4-only"
 }
 
+# Reads the configured network mode, normalizing invalid values and falling
+# back to safe defaults if the config is missing.
 get_configured_network_mode() {
     if [ -f "$NETWORK_MODE_FILE" ]; then
         _mode=$(head -n 1 "$NETWORK_MODE_FILE" 2>/dev/null | tr -d '\r\n')
@@ -102,6 +117,8 @@ ensure_network_mode_file() {
     fi
 }
 
+# Updates the network mode configuration with validation.
+# Prevents enabling 'auto' mode if working IPv6 routing cannot be detected.
 set_configured_network_mode() {
     _mode=$(normalize_network_mode "$1")
     [ -n "$_mode" ] || {
@@ -137,6 +154,8 @@ ipv6_firewall_enabled() {
     ipv6_network_available && ip6tables_supported
 }
 
+# Resolves the precise human-readable status of the network stack, including
+# whether the auto mode had to fall back to IPv4 due to lack of IPv6 support.
 get_runtime_network_mode_label() {
     _mode=$(get_configured_network_mode)
     case "$_mode" in
@@ -218,6 +237,7 @@ get_private_dns_mode() {
     echo "$_mode"
 }
 
+# Retrieves the current custom Private DNS provider hostname from Android settings.
 get_private_dns_hostname() {
     _host=$(read_global_setting private_dns_specifier 2>/dev/null || echo "")
     normalize_private_dns_hostname "$_host"
@@ -277,6 +297,7 @@ get_private_dns_display_label() {
     esac
 }
 
+# Provides a human-readable summary of the current Private DNS configuration.
 get_private_dns_status_summary() {
     if ! private_dns_available; then
         echo "Unavailable (settings command missing)"
@@ -436,6 +457,8 @@ append_json_check() {
 }
 
 # Process management
+
+# Validates if a PID belongs to an active process, preventing false positives from zombie states.
 is_live_pid() {
     _pid="$1"
     [ -n "$_pid" ] || return 1
@@ -502,6 +525,7 @@ get_active_profile_config() {
     get_profile_config_file "$(get_active_profile)"
 }
 
+# Probes a profile's configuration file to determine if it explicitly references the personal hostlist.
 profile_uses_user_list() {
     _pname="$1"
     _pconfig=$(get_profile_config_file "$_pname")
@@ -554,6 +578,8 @@ list_profiles() {
 }
 
 # Counters with cache
+
+# Returns the number of lines in a file, creating and using a cache file for speed.
 get_list_count() {
     _cache_file="$1"
     _list_file="$2"
@@ -605,6 +631,7 @@ make_temp_file() {
     echo "$_tmp"
 }
 
+# Overwrites the user list with new domains. Safely filters empty strings and duplicates.
 write_user_list_entries() {
     _tmp=$(make_temp_file) || return 1
     : > "$_tmp" || {
@@ -632,6 +659,7 @@ write_user_list_entries() {
     }
 }
 
+# Adds new domains to the user list, checking for existing entries to prevent duplication.
 append_user_list_entries() {
     _tmp=$(make_temp_file) || return 1
     : > "$_tmp" || {
@@ -672,6 +700,7 @@ append_user_list_entries() {
     echo "$_added"
 }
 
+# Subtracts specified domains from the active user list safely using a temporary file.
 remove_user_list_entries() {
     _tmp=$(make_temp_file) || return 1
     : > "$_tmp" || {
@@ -732,6 +761,31 @@ print_network_mode_status() {
     echo "Network mode: $(get_runtime_network_mode_label)"
 }
 
+print_tg_summary_human() {
+    if ! tg_binary_exists; then
+        echo "tgwsproxy: [MISSING]"
+        return
+    fi
+
+    _tg_pid=$(read_tg_pid 2>/dev/null || true)
+    _tg_listen=$("$TGWSPROXY_BIN" status --config "$TGWSPROXY_CONFIG_FILE" --pid-file "$TGWSPROXY_PID_FILE" 2>/dev/null | sed -n 's/^Listen: //p' | head -n 1)
+
+    if [ -n "$_tg_pid" ] && is_live_pid "$_tg_pid"; then
+        if [ -n "$_tg_listen" ]; then
+            echo "tgwsproxy: [ON] (PID: $_tg_pid, $_tg_listen)"
+        else
+            echo "tgwsproxy: [ON] (PID: $_tg_pid)"
+        fi
+        return
+    fi
+
+    if [ -n "$_tg_listen" ]; then
+        echo "tgwsproxy: [OFF] ($_tg_listen)"
+    else
+        echo "tgwsproxy: [OFF]"
+    fi
+}
+
 print_status_human() {
     _ver=$(get_version)
     _pid=$(get_first_pid)
@@ -750,6 +804,7 @@ print_status_human() {
     else
         echo "nfqws2: [OFF]"
     fi
+    print_tg_summary_human
 
     echo "iptables rules: $_rules (IPv4), $_rules6 (IPv6)"
     print_network_mode_status
@@ -824,11 +879,14 @@ print_status_json() {
     else
         _private_dns_initialized=false
     fi
+    _tg_json=$(print_tg_status_json | tr -d '\r\n')
+    [ -n "$_tg_json" ] || _tg_json="null"
 
-    printf '{"version":"%s","active":%s,"pid":"%s","pid_count":%s,"rules_v4":%s,"rules_v6":%s,"domain_count":%s,"google_domain_count":%s,"user_domain_count":%s,"user_list_attached":%s,"profile":"%s","profile_label":"%s","network_mode":"%s","network_mode_label":"%s","ipv6_available":%s,"ipv6_enabled":%s,"private_dns_available":%s,"private_dns_initialized":%s,"private_dns_mode":"%s","private_dns_mode_label":"%s","private_dns_hostname":"%s","private_dns_label":"%s","private_dns_default_hostname":"%s"}\n' \
-        "$(json_escape "$_ver")" "$_active" "$(json_escape "$_pid")" "$_pid_count" "$_rules" "$_rules6" "$_lc" "$_google_lc" "$_user_lc" "$_user_attached" "$(json_escape "$_prof_name")" "$(json_escape "$_prof_label")" "$(json_escape "$_network_mode")" "$(json_escape "$_network_mode_label")" "$_ipv6_available" "$_ipv6_enabled" "$_private_dns_available" "$_private_dns_initialized" "$(json_escape "$_private_dns_mode")" "$(json_escape "$_private_dns_mode_label")" "$(json_escape "$_private_dns_hostname")" "$(json_escape "$_private_dns_label")" "$(json_escape "$DEFAULT_PRIVATE_DNS_HOSTNAME")"
+    printf '{"version":"%s","active":%s,"pid":"%s","pid_count":%s,"rules_v4":%s,"rules_v6":%s,"domain_count":%s,"google_domain_count":%s,"user_domain_count":%s,"user_list_attached":%s,"profile":"%s","profile_label":"%s","network_mode":"%s","network_mode_label":"%s","ipv6_available":%s,"ipv6_enabled":%s,"private_dns_available":%s,"private_dns_initialized":%s,"private_dns_mode":"%s","private_dns_mode_label":"%s","private_dns_hostname":"%s","private_dns_label":"%s","private_dns_default_hostname":"%s","tg":%s}\n' \
+        "$(json_escape "$_ver")" "$_active" "$(json_escape "$_pid")" "$_pid_count" "$_rules" "$_rules6" "$_lc" "$_google_lc" "$_user_lc" "$_user_attached" "$(json_escape "$_prof_name")" "$(json_escape "$_prof_label")" "$(json_escape "$_network_mode")" "$(json_escape "$_network_mode_label")" "$_ipv6_available" "$_ipv6_enabled" "$_private_dns_available" "$_private_dns_initialized" "$(json_escape "$_private_dns_mode")" "$(json_escape "$_private_dns_mode_label")" "$(json_escape "$_private_dns_hostname")" "$(json_escape "$_private_dns_label")" "$(json_escape "$DEFAULT_PRIVATE_DNS_HOSTNAME")" "$_tg_json"
 }
 
+# Counts the number of active NFQUEUE rules currently instantiated in the firewall.
 get_rule_count() {
     _tbl_cmd="$1"
     $_tbl_cmd -w -t mangle -L "$CHAIN" -n 2>/dev/null | grep -c NFQUEUE
@@ -848,6 +906,7 @@ has_jump_rules() {
     return 1
 }
 
+# Manually cleans firewall traces specific to the CLI's stop/restart procedures.
 cleanup_jump_rules_local() {
     while check_jump_rule iptables OUTPUT; do
         iptables -w -t mangle -D OUTPUT -j "$CHAIN" >/dev/null 2>&1 || break
@@ -881,6 +940,63 @@ wait_for_process_exit() {
 
 run_uninstall_cleanup() {
     "$MODDIR/uninstall.sh" >/dev/null 2>&1 || true
+}
+
+# tgwsproxy helper management
+tg_binary_exists() {
+    [ -f "$TGWSPROXY_BIN" ]
+}
+
+read_tg_pid() {
+    [ -f "$TGWSPROXY_PID_FILE" ] || return 1
+    _tg_pid=$(head -n 1 "$TGWSPROXY_PID_FILE" 2>/dev/null | tr -d '\r\n')
+    case "$_tg_pid" in
+        ""|*[!0-9]*) return 1 ;;
+    esac
+    printf '%s' "$_tg_pid"
+}
+
+print_tg_status_json() {
+    if tg_binary_exists; then
+        _tg_binary_exists=true
+        _tg_runtime_json=$("$TGWSPROXY_BIN" status --json --config "$TGWSPROXY_CONFIG_FILE" --pid-file "$TGWSPROXY_PID_FILE" 2>/dev/null | tr -d '\r\n')
+        [ -n "$_tg_runtime_json" ] || _tg_runtime_json="null"
+    else
+        _tg_binary_exists=false
+        _tg_runtime_json="null"
+    fi
+
+    printf '{"enabled":%s,"binary_exists":%s,"config_path":"%s","pid_file":"%s","log_file":"%s","connection_log":"%s","runtime":%s}\n' \
+        "true" \
+        "$_tg_binary_exists" \
+        "$(json_escape "$TGWSPROXY_CONFIG_FILE")" \
+        "$(json_escape "$TGWSPROXY_PID_FILE")" \
+        "$(json_escape "$TGWSPROXY_LOGFILE")" \
+        "$(json_escape "$TGWSPROXY_CONN_LOGFILE")" \
+        "$_tg_runtime_json"
+}
+
+print_tg_usage() {
+    echo "Usage: nzapret tg [link]"
+    echo ""
+    echo "Use 'nzapret status' for the combined module runtime status."
+    echo "Use 'nzapret start|stop|restart' to control both nfqws2 and tgwsproxy."
+}
+
+run_tg_command() {
+    case "$1" in
+        "link")
+            if ! tg_binary_exists; then
+                echo "[-] tgwsproxy binary is missing from the module package."
+                return 1
+            fi
+            "$TGWSPROXY_BIN" link --config "$TGWSPROXY_CONFIG_FILE" || return 1
+            ;;
+        *)
+            print_tg_usage
+            return 1
+            ;;
+    esac
 }
 
 # Service control
@@ -945,6 +1061,7 @@ list_required_runtime_files() {
         "$PAYLOAD_TLS_FILE"
 }
 
+# Reloads the nfqws2 runtime lists dynamically via SIGHUP instead of full process restart.
 refresh_hostlists_if_running() {
     if is_running; then
         _reloaded=0
@@ -1262,6 +1379,11 @@ case "$1" in
         esac
         ;;
 
+    "tg")
+        shift
+        run_tg_command "$1" "$2" || exit 1
+        ;;
+
     "log")
         _pid=$(get_first_pid)
         _pid_count=$(get_pid_count)
@@ -1532,6 +1654,7 @@ case "$1" in
         echo "  update [list]               - update routing hostlist"
         echo "  status                      - show nfqws2, iptables and list info"
         echo "  status --json               - machine-readable status for WebUI"
+        echo "  tg <subcommand>             - tgwsproxy helper commands"
         echo "  log                         - show nfqws2 runtime log"
         echo "  events                      - show event history"
         echo "  events clear                - clear the whole event log file"
@@ -1545,6 +1668,8 @@ case "$1" in
         echo ""
         echo "Network commands: status, set <auto|ipv4-only>"
         echo "DNS commands: status, set <off|auto|default>, set hostname <fqdn>"
+        echo "TG commands: link"
+        echo "Lifecycle: start, stop, restart control both nfqws2 and tgwsproxy together"
         echo "User list commands: status, show, add, remove, replace, clear"
         ;;
 esac

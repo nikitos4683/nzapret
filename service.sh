@@ -17,7 +17,13 @@ PAYLOADS="$MODDIR/payloads"
 LUA_DIR="$MODDIR/lua"
 PAYLOAD_QUIC_FILE="$PAYLOADS/quic_initial_www_google_com.bin"
 PAYLOAD_TLS_FILE="$PAYLOADS/tls_clienthello_www_google_com.bin"
-BIN="$MODDIR/bin/nfqws2"
+BIN="$MODDIR/bin/nfqws2/nfqws2"
+TG_DIR="$MODDIR/tg"
+TGWSPROXY_BIN="$MODDIR/bin/tgwsproxy/tgwsproxy"
+TGWSPROXY_CONFIG_FILE="$TG_DIR/config.json"
+TGWSPROXY_PID_FILE="$TG_DIR/tgwsproxy.pid"
+TGWSPROXY_LOGFILE="$TG_DIR/tgwsproxy.log"
+TGWSPROXY_CONN_LOGFILE="$TG_DIR/connections.log"
 PROFILE_DIR="$MODDIR/profiles"
 ACTIVE_PROFILE_FILE="$PROFILE_DIR/profile.current"
 NETWORK_MODE_FILE="$PROFILE_DIR/network.mode"
@@ -25,6 +31,7 @@ PRIVATE_DNS_INIT_FILE="$MODDIR/.private_dns_initialized"
 DEFAULT_PROFILE="default"
 DEFAULT_PRIVATE_DNS_HOSTNAME="xbox-dns.ru"
 PROCESS_NAME="nfqws2"
+TGWSPROXY_PROCESS_NAME="tgwsproxy"
 START_MODE="${1:-boot}"
 NETWORK_MODE=""
 IPV6_ENABLED=0
@@ -60,8 +67,10 @@ require_file() {
     [ -f "$1" ] || fail "missing file: $1"
 }
 
+# Initializes module data directories and generates missing configurations if necessary.
 ensure_runtime_layout() {
-    mkdir -p "$PROFILE_DIR" "$LISTS" || fail "mkdir -p failed"
+    mkdir -p "$PROFILE_DIR" "$LISTS" "$TG_DIR" || fail "mkdir -p failed"
+    rm -f "$TG_DIR/disabled" 2>/dev/null || true
     ensure_user_list_file
     ensure_network_mode_file
 }
@@ -78,6 +87,7 @@ normalize_network_mode() {
     esac
 }
 
+# Checks if the device has an active global IPv6 address and route.
 ipv6_network_available() {
     has_cmd ip || return 1
     ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 ' || return 1
@@ -121,6 +131,8 @@ ip6tables_supported() {
     ip6tables -w -t mangle -L >/dev/null 2>&1
 }
 
+# Determines the active network mode and configures IPV6_ENABLED accordingly.
+# This prevents blackholing traffic when the selected mode requires IPv6 but the device/carrier does not support it.
 resolve_network_mode() {
     NETWORK_MODE=$(get_network_mode)
     case "$NETWORK_MODE" in
@@ -182,6 +194,8 @@ get_private_dns_hostname() {
     normalize_private_dns_hostname "$_host"
 }
 
+# Strict validation for Private DNS hostnames.
+# Prevents injecting invalid payloads into Android global settings.
 is_valid_private_dns_hostname() {
     _host=$(normalize_private_dns_hostname "$1")
     [ -n "$_host" ] || return 1
@@ -222,6 +236,8 @@ mark_private_dns_initialized() {
     : > "$PRIVATE_DNS_INIT_FILE" 2>/dev/null
 }
 
+# Initializes Android Private DNS to the module's default on the first run.
+# Preserves existing valid provider hostnames if they are already configured.
 ensure_private_dns_initialized() {
     has_cmd settings || {
         log_event DNS "settings command unavailable, skipping Private DNS initialization"
@@ -244,6 +260,81 @@ ensure_private_dns_initialized() {
     else
         log_event ERROR "failed to initialize Private DNS provider"
     fi
+}
+
+read_tg_pid() {
+    [ -f "$TGWSPROXY_PID_FILE" ] || return 1
+    _tg_pid=$(head -n 1 "$TGWSPROXY_PID_FILE" 2>/dev/null | tr -d '\r\n')
+    case "$_tg_pid" in
+        ""|*[!0-9]*) return 1 ;;
+    esac
+    printf '%s' "$_tg_pid"
+}
+
+wait_for_tg_exit() {
+    _tries="${1:-20}"
+    _pid="$2"
+    while kill -0 "$_pid" 2>/dev/null && [ "$_tries" -gt 0 ]; do
+        sleep 0.1 2>/dev/null || sleep 1
+        _tries=$((_tries - 1))
+    done
+    ! kill -0 "$_pid" 2>/dev/null
+}
+
+# Gracefully stops tgwsproxy via SIGTERM, falling back to SIGKILL.
+stop_tgwsproxy() {
+    _stopped=0
+    _pid=$(read_tg_pid 2>/dev/null || true)
+    if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null; then
+        kill "$_pid" 2>/dev/null || true
+        if ! wait_for_tg_exit 20 "$_pid"; then
+            kill -9 "$_pid" 2>/dev/null || true
+            wait_for_tg_exit 5 "$_pid" || true
+        fi
+        _stopped=1
+    fi
+
+    killall "$TGWSPROXY_PROCESS_NAME" 2>/dev/null || true
+    rm -f "$TGWSPROXY_PID_FILE"
+
+    [ "$_stopped" = "1" ]
+}
+
+# Starts tgwsproxy if available. Validates successful startup.
+start_tgwsproxy() {
+    if [ ! -f "$TGWSPROXY_BIN" ]; then
+        log_event TGPROXY "binary missing, skipping"
+        return 0
+    fi
+
+    chmod +x "$TGWSPROXY_BIN" 2>/dev/null || true
+    stop_tgwsproxy >/dev/null 2>&1 || true
+
+    "$TGWSPROXY_BIN" run \
+        --quiet \
+        --config "$TGWSPROXY_CONFIG_FILE" \
+        --pid-file "$TGWSPROXY_PID_FILE" \
+        --log-file "$TGWSPROXY_LOGFILE" \
+        --conn-log-file "$TGWSPROXY_CONN_LOGFILE" \
+        >/dev/null 2>&1 &
+    _tg_pid=$!
+
+    sleep 1
+    if kill -0 "$_tg_pid" 2>/dev/null; then
+        log_event TGPROXY "started (pid: $_tg_pid)"
+        return 0
+    fi
+
+    if [ -f "$TGWSPROXY_LOGFILE" ]; then
+        _tg_last_log=$(tail -n 1 "$TGWSPROXY_LOGFILE" 2>/dev/null | tr -d '\r')
+        if [ -n "$_tg_last_log" ]; then
+            log_event ERROR "tgwsproxy exited immediately: $_tg_last_log"
+            return 1
+        fi
+    fi
+
+    log_event ERROR "tgwsproxy exited immediately"
+    return 1
 }
 
 # Iptables helpers
@@ -301,6 +392,9 @@ get_active_profile_config() {
     echo "$PROFILE_DIR/$(get_active_profile).conf"
 }
 
+# Parses the active profile sequentially.
+# Extracts metadata (label) and vital parameters (--qnum, --filter-tcp, --filter-udp) for firewall rule generation.
+# Non-comment lines will map directly to nfqws2 arguments during execution.
 # Sets: PROFILE_LABEL, QUEUE_NUM, TCP_PORTS, UDP_PORTS.
 load_profile() {
     ACTIVE_PROFILE=$(get_active_profile)
@@ -346,8 +440,9 @@ load_profile() {
         || fail "profile $ACTIVE_PROFILE: no --filter-tcp or --filter-udp found"
 }
 
-# Reads profile args and starts nfqws2 in background.
-# Outputs the PID of the started process.
+# Constructs the nfqws2 command line directly from the active profile.
+# Drops `--bind-fix6` if the IPv6 firewall is disabled to prevent nfqws2 execution errors.
+# Starts nfqws2 in the background and outputs the PID of the started process.
 start_nfqws2_from_profile() {
     _cfg=$(get_active_profile_config)
     [ -f "$_cfg" ] || fail "profile config not found: $_cfg"
@@ -370,7 +465,9 @@ start_nfqws2_from_profile() {
     echo $!
 }
 
-# Firewall: NFQUEUE rules with multiport limit handling
+# Firewall: NFQUEUE rules with multiport limit handling.
+# Groups up to 15 ports per rule using the 'multiport' match to optimize iptables processing,
+# minimizing the total number of rules required. Port ranges count as weight 2.
 add_nfqueue_rule() {
     _tbl="$1"
     _proto="$2"
@@ -435,6 +532,8 @@ trim_event_log() {
     fi
 }
 
+# Waits for Android property 'sys.boot_completed' to indicate the system is fully booted.
+# Ensures that network interfaces and settings are completely initialized before proceeding.
 wait_for_boot_completion() {
     if [ "$START_MODE" = "manual" ]; then
         if [ "$(getprop sys.boot_completed)" != "1" ]; then
@@ -458,6 +557,7 @@ verify_required_files() {
     done
 }
 
+# Appends RETURN rules to the custom chains to prevent processing traffic that shouldn't be touched.
 apply_bypass_rules() {
     # Bypass nfqws2-generated fake packets to avoid loops and needless requeueing.
     ipt_run  -t mangle -A "$CHAIN" -m mark --mark 0x40000000/0x40000000 -j RETURN
@@ -475,6 +575,7 @@ apply_bypass_rules() {
     done
 }
 
+# Validates that jump rules were successfully applied to the iptables chains.
 verify_jump_rules() {
     check_jump_rule "$IPT" OUTPUT || fail "iptables OUTPUT jump missing after apply"
     check_jump_rule "$IPT" FORWARD || fail "iptables FORWARD jump missing after apply"
@@ -543,3 +644,6 @@ NFQWS2_PID=$(start_nfqws2_from_profile)
 sleep 1
 kill -0 "$NFQWS2_PID" 2>/dev/null || fail "nfqws2 exited immediately, see $LOGFILE"
 log_event NFQWS2 "started (pid: $NFQWS2_PID)"
+
+# Start tgwsproxy (best effort, does not fail the main nzapret path)
+start_tgwsproxy || true

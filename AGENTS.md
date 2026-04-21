@@ -33,8 +33,10 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
   - Fake TLS/QUIC payloads referenced by profiles.
 - `lua/*.lua`
   - Upstream `nfqws2` helper libraries loaded by profiles via `--lua-init`.
-- `bin/nfqws2-*`
-  - Architecture-specific binaries. `customize.sh` renames the selected one to `bin/nfqws2` during install.
+- `bin/nfqws2/nfqws2-*`
+  - Architecture-specific `nfqws2` binaries. `customize.sh` renames the selected one to `bin/nfqws2/nfqws2` during install.
+- `bin/tgwsproxy/tgwsproxy-*`
+  - Optional architecture-specific `tgwsproxy` helper binaries. `customize.sh` keeps only the selected one as `bin/tgwsproxy/tgwsproxy` during install.
 - `webroot/`
   - KernelSU WebUI (`index.html`, `style.css`, `kernelsu.js`).
 - `META-INF/com/google/android/*`
@@ -52,7 +54,7 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
 
 ## Runtime Flow
 
-1. The installer runs `customize.sh`, which unpacks the module, selects `bin/nfqws2-$ARCH`, renames it to `bin/nfqws2`, removes the unused binaries, and fixes permissions.
+1. The installer runs `customize.sh`, which unpacks the module, selects `bin/nfqws2/nfqws2-$ARCH`, renames it to `bin/nfqws2/nfqws2`, optionally selects `bin/tgwsproxy/tgwsproxy-$ARCH`, removes the unused binaries, and fixes permissions.
 2. At boot, or via a manual CLI start, `service.sh` waits for Android boot completion, ensures mutable runtime files exist, initializes Android Private DNS once, resolves the network stack mode, loads the active profile, recreates the `nzapret_out` chains in IPv4 and optionally IPv6 `mangle`, and launches `nfqws2`.
 3. `system/bin/nzapret` is the operator-facing interface. It wraps start/stop/restart, updates hostlists, switches profiles, manages network mode and Android Private DNS, exposes diagnostics, and returns JSON consumed by the WebUI.
 4. `webroot/index.html` talks to the CLI through `ksu.exec(...)`; it does not mutate module internals directly.
@@ -129,7 +131,7 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
   - `update.json` `changelog` must point to the raw GitHub file URL on `main`: `https://raw.githubusercontent.com/<owner>/<repo>/refs/heads/main/.github/release-notes/${version}.md`.
 
 - Do not edit opaque artifacts casually.
-  - `bin/nfqws2-*` and `payloads/*.bin` are binary assets.
+  - `bin/nfqws2/nfqws2-*`, `bin/tgwsproxy/tgwsproxy-*`, and `payloads/*.bin` are binary assets.
   - Treat them as replace-only artifacts unless the task explicitly requires binary changes.
 
 - Preserve LF line endings for packaged text files.

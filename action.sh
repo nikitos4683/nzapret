@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # action.sh for Magisk/KernelSU
-# Quick toggle action: Start/Stop nzapret service
+# Quick toggle action: Start/Stop nzapret service and its tg helper
 
 MODDIR=${0%/*}
 CLI="$MODDIR/system/bin/nzapret"
@@ -26,7 +26,7 @@ is_running() {
 print_status_summary() {
     echo ""
     echo "[*] Current Status:"
-    "$CLI" status | grep -E 'nfqws2:|iptables|Network mode:'
+    "$CLI" status | grep -E 'nfqws2:|tgwsproxy:|iptables|Network mode:'
 }
 
 print_header
