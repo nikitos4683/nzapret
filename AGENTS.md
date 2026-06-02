@@ -186,6 +186,7 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
 ### WebUI
 
 - `webroot/index.html` is the real app; `kernelsu.js` is only a thin bridge over `ksu.exec`.
+- The WebUI JS is split into ES modules loaded via `<script type="module">`: `app.js` is the stateful controller (owns DOM state, render, `window.*` handlers for inline `onclick`), `cli.js` owns the CLI contract (`CLI`/`MODDIR` constants, `matchJson`, `combineOutput`), `utils.js` holds pure state-free helpers, and `i18n.js` holds translations. Keep CLI command/JSON parsing in `cli.js` and add pure helpers to `utils.js` rather than the controller. New `webroot/*.js` files are packaged automatically via the `webroot` entry in `build.sh`.
 - Keep the UI aligned with actual CLI capabilities instead of adding mock controls.
 - If you add a new operator feature, prefer implementing it in the CLI first and then wiring the UI to it.
 - The runtime status card currently shows:

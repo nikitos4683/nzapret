@@ -1,4 +1,18 @@
 import { exec } from './kernelsu.js';
+import { CLI, MODDIR, matchJson, combineOutput } from './cli.js';
+import {
+    esc,
+    isPaneNearBottom,
+    isValidPrivateDnsHostname,
+    parseUserListEntries,
+    scrollPaneToBottom,
+    setButtonDisabled,
+    setPaneScrollTop,
+    shellQuote,
+    toComparableUserListText,
+    updatePaneContent,
+    waitForPaint
+} from './utils.js';
 import {
     applyStaticTranslations,
     formatNumber,
@@ -9,11 +23,8 @@ import {
     tc
 } from './i18n.js';
 
-const MODDIR = '/data/adb/modules/nzapret';
-const CLI = `sh ${MODDIR}/system/bin/nzapret`;
 const LOG_POLL_MS = 3000;
 const EVENTS_POLL_MS = 5000;
-const LOG_BOTTOM_THRESHOLD = 40;
 const PAGE_VIEWS = {
     runtime: {
         pageId: 'pageRuntime',
@@ -81,19 +92,6 @@ let uiLockState = {
     translate: true
 };
 
-function shellQuote(value) {
-    return "'" + String(value).replace(/'/g, "'\\''") + "'";
-}
-
-function esc(str) {
-    return String(str || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
 function resolveMessage(message, params = {}, translate = true) {
     return translate ? t(message, params) : String(message);
 }
@@ -114,38 +112,6 @@ function rerenderUiLock() {
     text.textContent = resolveMessage(uiLockState.message, uiLockState.params, uiLockState.translate);
 }
 
-function waitForPaint() {
-    return new Promise((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(resolve));
-    });
-}
-
-function isPaneNearBottom(pane) {
-    return pane.scrollHeight - pane.scrollTop - pane.clientHeight < LOG_BOTTOM_THRESHOLD;
-}
-
-function clampPaneScrollTop(pane, scrollTop) {
-    return Math.max(0, Math.min(scrollTop, pane.scrollHeight - pane.clientHeight));
-}
-
-function setPaneScrollTop(pane, scrollTop) {
-    const applyScroll = () => {
-        pane.scrollTop = clampPaneScrollTop(pane, scrollTop);
-    };
-
-    applyScroll();
-    requestAnimationFrame(applyScroll);
-}
-
-function scrollPaneToBottom(pane) {
-    const applyScroll = () => {
-        pane.scrollTop = pane.scrollHeight;
-    };
-
-    applyScroll();
-    requestAnimationFrame(applyScroll);
-}
-
 function getLogViewState(view = activeLogView) {
     return logState[view];
 }
@@ -163,23 +129,6 @@ function setLogViewScrolledUp(view, scrolledUp) {
     const state = getLogViewState(view);
     if (!state) return;
     state.scrolledUp = scrolledUp;
-}
-
-function updatePaneContent(pane, nextContent, options = {}) {
-    const { html = false } = options;
-    const currentContent = html ? pane.innerHTML : pane.textContent;
-
-    if (currentContent === nextContent) {
-        return false;
-    }
-
-    if (html) {
-        pane.innerHTML = nextContent;
-    } else {
-        pane.textContent = nextContent;
-    }
-
-    return true;
 }
 
 function syncLogPaneScroll(view, pane, previousScrollTop, options = {}) {
@@ -218,26 +167,6 @@ function rerenderToast() {
     toast.textContent = resolveMessage(toastState.message, toastState.params, toastState.translate);
 }
 
-function parseUserListEntries(text) {
-    return String(text || '')
-        .replace(/\r/g, '')
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line && !line.startsWith('#'));
-}
-
-function toComparableUserListText(value) {
-    return Array.isArray(value)
-        ? value.join('\n')
-        : parseUserListEntries(value).join('\n');
-}
-
-function setButtonDisabled(button, disabled) {
-    if (!button) return;
-    button.disabled = disabled;
-    button.classList.toggle('disabled', disabled);
-}
-
 function getSelectedNetworkMode(status = currentStatus) {
     if (networkModeDraft) {
         return networkModeDraft;
@@ -256,22 +185,6 @@ function getPrivateDnsDefaultHostname(status = currentStatus) {
     return status && status.private_dns_default_hostname
         ? status.private_dns_default_hostname
         : 'xbox-dns.ru';
-}
-
-function isValidPrivateDnsHostname(value) {
-    const host = String(value || '').trim().toLowerCase();
-    if (!host || host.length > 253) return false;
-    if (host.startsWith('.') || host.endsWith('.') || host.includes('..')) return false;
-    if (!/^[a-z0-9.-]+$/.test(host)) return false;
-
-    const labels = host.split('.');
-    if (labels.length < 2) return false;
-    return labels.every((label) =>
-        label.length > 0
-        && label.length <= 63
-        && !label.startsWith('-')
-        && !label.endsWith('-')
-    );
 }
 
 function getStaticTranslationParams() {
@@ -925,11 +838,9 @@ async function refreshEvents() {
     eventsRequestInFlight = true;
     try {
         const res = await exec(`${CLI} events --json --tail=50`);
-        const raw = (res.stdout || '').trim();
-        const arrMatch = raw.match(/\[[\s\S]*\]/);
-        if (arrMatch) {
+        const payload = matchJson(res, { array: true });
+        if (payload) {
             const eventsState = getLogViewState('events');
-            const payload = arrMatch[0];
             if (payload === eventsState.lastPayload) {
                 return;
             }
@@ -1078,15 +989,14 @@ async function runDiagnose() {
         await waitForPaint();
 
         const res = await exec(`${CLI} diagnose --json`);
-        const raw = (res.stdout || '').trim();
-        const jsonMatch = raw.match(/\{[\s\S]*\}/);
+        const payload = matchJson(res);
 
-        if (!jsonMatch) {
+        if (!payload) {
             showToast('diagnostics.failed');
             return;
         }
 
-        diagnosticsData = JSON.parse(jsonMatch[0]);
+        diagnosticsData = JSON.parse(payload);
         diagnosticsExpanded = false;
         renderDiagnosticsPanel();
         showToast('diagnostics.completed');
@@ -1144,9 +1054,7 @@ async function runCli(args, options = {}) {
 
     try {
         const res = await exec(`${CLI} ${args}`);
-        const stdout = (res.stdout || '').trim();
-        const stderr = (res.stderr || '').trim();
-        const combined = [stdout, stderr].filter(Boolean).join('\n');
+        const combined = combineOutput(res);
         const ok = res.errno === 0;
 
         if (ok) {
@@ -1235,14 +1143,13 @@ async function refreshStatus(force = false) {
 
     try {
         const res = await exec(`${CLI} status --json`);
-        const raw = (res.stdout || '').trim();
-        const jsonMatch = raw.match(/\{[\s\S]*\}/);
+        const payload = matchJson(res);
 
-        if (!jsonMatch) {
-            throw new Error((raw || res.stderr || 'status command failed').trim());
+        if (!payload) {
+            throw new Error(combineOutput(res) || 'status command failed');
         }
 
-        currentStatus = JSON.parse(jsonMatch[0]);
+        currentStatus = JSON.parse(payload);
         statusViewState = 'ready';
         hasShownStatusError = false;
         rerenderNonLogUi();
@@ -1337,16 +1244,14 @@ async function saveNetworkMode() {
     try {
         const saveRes = await exec(`${CLI} network set ${shellQuote(selectedMode)}`);
         if (saveRes.errno !== 0) {
-            const details = [saveRes.stdout || '', saveRes.stderr || ''].join('\n').trim();
-            throw new Error(details || 'network set failed');
+            throw new Error(combineOutput(saveRes) || 'network set failed');
         }
         savedMode = true;
 
         if (shouldRestart) {
             const restartRes = await exec(`${CLI} restart`);
             if (restartRes.errno !== 0) {
-                const details = [restartRes.stdout || '', restartRes.stderr || ''].join('\n').trim();
-                throw new Error(details || 'restart failed');
+                throw new Error(combineOutput(restartRes) || 'restart failed');
             }
         }
 
@@ -1449,8 +1354,7 @@ async function loadUserList(force = false) {
     try {
         const res = await exec(`${CLI} list-user show`);
         if (res.errno !== 0) {
-            const details = [res.stdout || '', res.stderr || ''].join('\n').trim();
-            throw new Error(details || 'list-user show failed');
+            throw new Error(combineOutput(res) || 'list-user show failed');
         }
         const raw = (res.stdout || '').replace(/\r/g, '');
         const quickInput = document.getElementById('userListQuickInput');
