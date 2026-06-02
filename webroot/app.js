@@ -507,12 +507,22 @@ function updateUserListEditorState() {
     setButtonDisabled(document.getElementById('btnAddUserListDomain'), busy || !hasPendingInput);
 }
 
+// Lightweight handler for typing in the quick-add field: only the Add button
+// depends on the input, so avoid rebuilding the whole domain-list pane here.
+function updateUserListAddButton() {
+    const quickInput = document.getElementById('userListQuickInput');
+    if (!quickInput) return;
+    const busy = isLoading || userListRequestInFlight;
+    const hasPendingInput = Boolean(quickInput.value.trim());
+    setButtonDisabled(document.getElementById('btnAddUserListDomain'), busy || !hasPendingInput);
+}
+
 function setupUserListEditor() {
     const quickInput = document.getElementById('userListQuickInput');
     const pane = document.getElementById('userListPane');
     if (!quickInput || !pane || quickInput.dataset.bound === '1') return;
     quickInput.dataset.bound = '1';
-    quickInput.addEventListener('input', updateUserListEditorState);
+    quickInput.addEventListener('input', updateUserListAddButton);
     quickInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
             event.preventDefault();
@@ -894,15 +904,30 @@ async function refreshLog() {
 }
 
 function setupScrollTracking() {
-    function onScroll(view) {
+    // Coalesce bursts of scroll events into a single per-frame DOM update so
+    // dragging the log panes stays smooth instead of thrashing layout.
+    let scrollFrame = null;
+    let pendingView = null;
+
+    function flushScroll() {
+        scrollFrame = null;
+        const view = pendingView;
+        pendingView = null;
+        if (!view) return;
         const pane = getLogPane(view);
-        const scrolledUp = !isPaneNearBottom(pane);
-        setLogViewScrolledUp(view, scrolledUp);
+        setLogViewScrolledUp(view, !isPaneNearBottom(pane));
         updateStatusBar();
     }
 
+    function onScroll(view) {
+        pendingView = view;
+        if (scrollFrame === null) {
+            scrollFrame = requestAnimationFrame(flushScroll);
+        }
+    }
+
     Object.keys(LOG_VIEWS).forEach((view) => {
-        getLogPane(view).addEventListener('scroll', () => onScroll(view));
+        getLogPane(view).addEventListener('scroll', () => onScroll(view), { passive: true });
     });
 }
 
@@ -1062,8 +1087,7 @@ async function runCli(args, options = {}) {
                 showToast(successKey, successParams);
             }
             if (refresh) {
-                await refreshStatus(true);
-                await refreshActiveLogView();
+                await Promise.all([refreshStatus(true), refreshActiveLogView()]);
             }
         } else {
             showToast('generic.error_with_message', {
@@ -1256,8 +1280,7 @@ async function saveNetworkMode() {
         }
 
         networkModeDraft = '';
-        await refreshStatus(true);
-        await refreshActiveLogView();
+        await Promise.all([refreshStatus(true), refreshActiveLogView()]);
         showToast(shouldRestart ? 'network.saved_restart' : 'network.saved');
     } catch (error) {
         if (savedMode) {
