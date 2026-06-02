@@ -1096,6 +1096,11 @@ body.ui-busy .icon-btn {
     word-break: break-word;
     border: 1px solid var(--border);
     border-bottom: none;
+    /* Isolate the scroller into its own composited layer so scrolling does not
+       force the blurred ancestor card to re-rasterize every frame. */
+    contain: paint;
+    transform: translateZ(0);
+    overscroll-behavior: contain;
 }
 
 .log-pane.active {
@@ -1116,6 +1121,11 @@ body.ui-busy .icon-btn {
     overflow-y: auto;
     border: 1px solid var(--border);
     border-bottom: none;
+    /* Isolate the scroller into its own composited layer so scrolling does not
+       force the blurred ancestor card to re-rasterize every frame. */
+    contain: paint;
+    transform: translateZ(0);
+    overscroll-behavior: contain;
 }
 
 .events-pane.active {
@@ -1231,6 +1241,10 @@ body.ui-busy .icon-btn {
     flex: 1 1 0;
     margin-bottom: 0;
     overflow: hidden;
+    /* The logs card hosts the scrolling panes; dropping its backdrop blur
+       removes per-frame backdrop re-rasterization while scrolling logs. */
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
 }
 
 #pageRuntime > .actions:last-child {
