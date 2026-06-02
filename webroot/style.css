@@ -1449,6 +1449,9 @@ body.ui-busy .icon-btn {
     color: var(--text-tertiary);
 }
 
+.diag-summary-text .pass-count { color: var(--green); }
+.diag-summary-text .fail-count { color: var(--red); }
+
 .diag-summary-actions {
     display: flex;
     align-items: center;

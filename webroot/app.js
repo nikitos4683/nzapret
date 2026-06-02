@@ -809,15 +809,13 @@ function renderDiagnosticsPanel() {
         ? t('diagnostics.hide_details')
         : t('diagnostics.show_details', { count: formatNumber(checks.length) });
 
+    const passed = `<span class="pass-count">${esc(t('diagnostics.summary_passed', { ok: formatNumber(counts.ok) }))}</span>`;
+    const failed = `<span class="fail-count">${esc(t('diagnostics.summary_failed', { fail: formatNumber(counts.fail) }))}</span>`;
+    const summaryText = t('diagnostics.summary', { passed, failed, total: esc(formatNumber(counts.total)) });
+
     summary.innerHTML = `
         <div class="diag-summary-main">
-            <span class="diag-summary-text">
-                ${esc(t('diagnostics.summary', {
-                    ok: formatNumber(counts.ok),
-                    fail: formatNumber(counts.fail),
-                    total: formatNumber(counts.total)
-                }))}
-            </span>
+            <span class="diag-summary-text">${summaryText}</span>
             <span class="diag-summary-note">${esc(diagnosticsExpanded ? t('diagnostics.expanded') : t('diagnostics.collapsed'))}</span>
         </div>
         <div class="diag-summary-actions">
