@@ -53,8 +53,7 @@ const translations = {
             stopping: 'Остановка nzapret...',
             restarting: 'Перезапуск nzapret...',
             updating_data: 'Обновление данных...',
-            completed: 'Команда {{command}} выполнена',
-            failed: 'Команда {{command}} завершилась с ошибкой'
+            completed: 'Команда {{command}} выполнена'
         },
         user_list: {
             title: 'Персональный список доменов',
@@ -273,8 +272,7 @@ const translations = {
             stopping: 'Stopping nzapret...',
             restarting: 'Restarting nzapret...',
             updating_data: 'Updating data...',
-            completed: '{{command}} completed',
-            failed: '{{command}} failed'
+            completed: '{{command}} completed'
         },
         user_list: {
             title: 'Personal Domain List',
