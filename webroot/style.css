@@ -464,10 +464,6 @@ body.ui-busy .icon-btn {
     gap: 3px;
 }
 
-.status-item-wide {
-    grid-column: 1 / -1;
-}
-
 .status-item-label {
     font-size: 10px;
     color: var(--text-tertiary);
@@ -1439,9 +1435,6 @@ body.ui-busy .icon-btn {
     color: var(--text-tertiary);
 }
 
-.diag-summary-text .pass-count { color: var(--green); }
-.diag-summary-text .fail-count { color: var(--red); }
-
 .diag-summary-actions {
     display: flex;
     align-items: center;
@@ -1530,25 +1523,6 @@ body.ui-busy .icon-btn {
     animation: cautionPulse 0.9s ease-in-out infinite;
 }
 
-@media (max-width: 420px) {
-    .private-dns-custom-row {
-        grid-template-columns: 1fr;
-    }
-
-    .private-dns-apply-btn {
-        width: 100%;
-    }
-
-    #diagCard .panel-head {
-        flex-direction: column;
-    }
-
-    #diagCard .diag-run-btn {
-        width: 100%;
-        justify-content: center;
-    }
-}
-
 @keyframes cautionPulse {
     0%, 100% { transform: scale(1); opacity: 1; }
     50% { transform: scale(1.08); opacity: 0.72; }
@@ -1573,6 +1547,19 @@ body.ui-busy .icon-btn {
 
     .private-dns-custom-row {
         grid-template-columns: 1fr;
+    }
+
+    .private-dns-apply-btn {
+        width: 100%;
+    }
+
+    #diagCard .panel-head {
+        flex-direction: column;
+    }
+
+    #diagCard .diag-run-btn {
+        width: 100%;
+        justify-content: center;
     }
 
     .diag-summary {
