@@ -29,20 +29,8 @@ START_MODE="${1:-boot}"
 NETWORK_MODE=""
 IPV6_ENABLED=0
 
-# Utilities
-log_event() {
-    _etype="$1"; shift
-    _ets=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "----")
-    printf '%s %-8s %s\n' "$_ets" "$_etype" "$*" >> "$EVENTLOG"
-}
-
-has_cmd() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-trim_setting_value() {
-    printf '%s' "$1" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
-}
+# Shared helpers (logging, network mode, IPv6 detection, Private DNS, settings I/O).
+. "$MODDIR/common.sh"
 
 # Emergency exit: rolls back iptables and kills nfqws2 to prevent unstable state.
 fail() {
@@ -70,41 +58,8 @@ ensure_user_list_file() {
     [ -f "$USER_LIST_FILE" ] || : > "$USER_LIST_FILE" || fail "cannot create $USER_LIST_FILE"
 }
 
-normalize_network_mode() {
-    case "$1" in
-        ""|"auto") echo "auto" ;;
-        "ipv4-only") echo "ipv4-only" ;;
-        *) echo "" ;;
-    esac
-}
-
-ipv6_network_available() {
-    has_cmd ip || return 1
-    ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 ' || return 1
-    ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1
-}
-
-detect_default_network_mode() {
-    if ipv6_network_available; then
-        echo "auto"
-        return
-    fi
-    echo "ipv4-only"
-}
-
-get_network_mode() {
-    if [ -f "$NETWORK_MODE_FILE" ]; then
-        _mode=$(head -n 1 "$NETWORK_MODE_FILE" 2>/dev/null | tr -d '\r\n')
-        _mode=$(normalize_network_mode "$_mode")
-        [ -n "$_mode" ] || _mode=$(detect_default_network_mode)
-        echo "$_mode"
-        return
-    fi
-    detect_default_network_mode
-}
-
 ensure_network_mode_file() {
-    _mode=$(get_network_mode)
+    _mode=$(get_configured_network_mode)
     if [ ! -f "$NETWORK_MODE_FILE" ]; then
         printf '%s\n' "$_mode" > "$NETWORK_MODE_FILE" || fail "cannot create $NETWORK_MODE_FILE"
         return
@@ -116,13 +71,8 @@ ensure_network_mode_file() {
     fi
 }
 
-ip6tables_supported() {
-    has_cmd ip6tables || return 1
-    ip6tables -w -t mangle -L >/dev/null 2>&1
-}
-
 resolve_network_mode() {
-    NETWORK_MODE=$(get_network_mode)
+    NETWORK_MODE=$(get_configured_network_mode)
     case "$NETWORK_MODE" in
         "ipv4-only")
             IPV6_ENABLED=0
@@ -140,73 +90,6 @@ resolve_network_mode() {
     esac
 }
 
-read_global_setting() {
-    has_cmd settings || return 1
-    _value=$(settings get global "$1" 2>/dev/null | tr -d '\r')
-    case "$_value" in
-        ""|"null") return 1 ;;
-    esac
-    printf '%s' "$_value"
-}
-
-put_global_setting() {
-    has_cmd settings || return 1
-    settings put global "$1" "$2" >/dev/null 2>&1
-}
-
-normalize_private_dns_mode() {
-    case "$1" in
-        ""|"opportunistic"|"auto") echo "opportunistic" ;;
-        "off") echo "off" ;;
-        "hostname"|"provider") echo "hostname" ;;
-        *) echo "" ;;
-    esac
-}
-
-normalize_private_dns_hostname() {
-    trim_setting_value "$1" | tr '[:upper:]' '[:lower:]'
-}
-
-get_private_dns_mode() {
-    _mode=$(read_global_setting private_dns_mode 2>/dev/null || echo "")
-    if [ -z "$_mode" ]; then
-        _mode=$(read_global_setting private_dns_default_mode 2>/dev/null || echo "")
-    fi
-    _mode=$(normalize_private_dns_mode "$_mode")
-    [ -n "$_mode" ] || _mode="opportunistic"
-    echo "$_mode"
-}
-
-get_private_dns_hostname() {
-    _host=$(read_global_setting private_dns_specifier 2>/dev/null || echo "")
-    normalize_private_dns_hostname "$_host"
-}
-
-is_valid_private_dns_hostname() {
-    _host=$(normalize_private_dns_hostname "$1")
-    [ -n "$_host" ] || return 1
-    [ "${#_host}" -le 253 ] || return 1
-    case "$_host" in
-        .*|*..*|*.) return 1 ;;
-        *[!a-z0-9.-]*) return 1 ;;
-    esac
-
-    _old_ifs=$IFS
-    IFS='.'
-    set -- $_host
-    IFS=$_old_ifs
-
-    [ "$#" -ge 2 ] || return 1
-    for _label in "$@"; do
-        [ -n "$_label" ] || return 1
-        [ "${#_label}" -le 63 ] || return 1
-        case "$_label" in
-            -*|*-) return 1 ;;
-        esac
-    done
-    return 0
-}
-
 set_private_dns_hostname_mode() {
     _host=$(normalize_private_dns_hostname "$1")
     is_valid_private_dns_hostname "$_host" || return 1
@@ -216,10 +99,6 @@ set_private_dns_hostname_mode() {
         put_global_setting private_dns_mode hostname || return 1
     fi
     return 0
-}
-
-mark_private_dns_initialized() {
-    : > "$PRIVATE_DNS_INIT_FILE" 2>/dev/null
 }
 
 ensure_private_dns_initialized() {
