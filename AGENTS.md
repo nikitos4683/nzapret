@@ -17,6 +17,8 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
   - Module metadata and version source for releases.
 - `customize.sh`
   - Install-time extraction, architecture selection, binary rename, and permission setup.
+- `common.sh`
+  - Shared POSIX `sh` helpers sourced by `service.sh` and `system/bin/nzapret` (logging, network-mode, IPv6 detection, Private DNS, Android settings I/O). Sourced, not executed.
 - `service.sh`
   - Main runtime entrypoint for boot/manual start. Rebuilds firewall state and launches `nfqws2`.
 - `uninstall.sh`
@@ -171,7 +173,8 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
 - Guard new external dependencies with `command -v` before use.
 - Keep log messages and failures actionable; the WebUI and CLI rely on them for debugging.
 - When changing cleanup or chain wiring, update verification logic everywhere it appears.
-- Keep duplicated shell helpers in sync between `service.sh` and `system/bin/nzapret` when they model the same behavior, especially network-mode, IPv6 availability, hostname validation, and Private DNS setting helpers.
+- Shared, side-effect-free helpers (logging, network-mode, IPv6 availability, hostname validation, Private DNS, Android settings I/O) live in `common.sh`, sourced by both `service.sh` and `system/bin/nzapret`. Add new shared helpers there instead of duplicating them; keep file-specific behavior (e.g. `fail`/`require_cmd` error semantics, `ensure_*`) local to each script.
+- `common.sh` assumes the sourcing script has already defined the path constants it uses (`EVENTLOG`, `NETWORK_MODE_FILE`, `PRIVATE_DNS_INIT_FILE`, `DEFAULT_PRIVATE_DNS_HOSTNAME`). Source it after those constants. New top-level files like `common.sh` must be added to `build.sh` `MODULE_ENTRIES`.
 
 ### Profiles
 
@@ -183,6 +186,7 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
 ### WebUI
 
 - `webroot/index.html` is the real app; `kernelsu.js` is only a thin bridge over `ksu.exec`.
+- The WebUI JS is split into ES modules loaded via `<script type="module">`: `app.js` is the stateful controller (owns DOM state, render, `window.*` handlers for inline `onclick`), `cli.js` owns the CLI contract (`CLI`/`MODDIR` constants, `matchJson`, `combineOutput`), `utils.js` holds pure state-free helpers, and `i18n.js` holds translations. Keep CLI command/JSON parsing in `cli.js` and add pure helpers to `utils.js` rather than the controller. New `webroot/*.js` files are packaged automatically via the `webroot` entry in `build.sh`.
 - Keep the UI aligned with actual CLI capabilities instead of adding mock controls.
 - If you add a new operator feature, prefer implementing it in the CLI first and then wiring the UI to it.
 - The runtime status card currently shows:

@@ -53,8 +53,7 @@ const translations = {
             stopping: 'Остановка nzapret...',
             restarting: 'Перезапуск nzapret...',
             updating_data: 'Обновление данных...',
-            completed: 'Команда {{command}} выполнена',
-            failed: 'Команда {{command}} завершилась с ошибкой'
+            completed: 'Команда {{command}} выполнена'
         },
         user_list: {
             title: 'Персональный список доменов',
@@ -137,7 +136,9 @@ const translations = {
             error: 'Ошибка диагностики: {{message}}',
             empty_title: 'Снимок диагностики пока не создан',
             empty_text: 'Запустите проверку, чтобы подтвердить работу процесса, цепочки фаервола и другие показатели работы перед разбором сырых логов.',
-            summary: 'Успешно: {{ok}} · С ошибкой: {{fail}} / {{total}}',
+            summary: '{{passed}} · {{failed}} / {{total}}',
+            summary_passed: 'Успешно: {{ok}}',
+            summary_failed: 'С ошибкой: {{fail}}',
             expanded: 'Подробный список раскрыт',
             collapsed: 'Подробный список скрыт',
             show_details: 'Показать детали ({{count}})',
@@ -273,8 +274,7 @@ const translations = {
             stopping: 'Stopping nzapret...',
             restarting: 'Restarting nzapret...',
             updating_data: 'Updating data...',
-            completed: '{{command}} completed',
-            failed: '{{command}} failed'
+            completed: '{{command}} completed'
         },
         user_list: {
             title: 'Personal Domain List',
@@ -357,7 +357,9 @@ const translations = {
             error: 'Diagnostics error: {{message}}',
             empty_title: 'No diagnostic snapshot yet',
             empty_text: 'Run a health check to confirm the process, firewall chains, and other live signals before chasing raw output.',
-            summary: '{{ok}} passed · {{fail}} failed / {{total}}',
+            summary: '{{passed}} · {{failed}} / {{total}}',
+            summary_passed: '{{ok}} passed',
+            summary_failed: '{{fail}} failed',
             expanded: 'Detailed checklist expanded',
             collapsed: 'Detailed checklist hidden',
             show_details: 'Show Details ({{count}})',

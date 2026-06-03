@@ -15,6 +15,6 @@
 /META-INF/com/google/android/update-binary text eol=lf
 /META-INF/com/google/android/updater-script text eol=lf
 
-/bin/nfqws-* binary
+/bin/nfqws2-* binary
 /payloads/*.bin binary
 *.zip binary

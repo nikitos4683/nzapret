@@ -18,6 +18,7 @@ STAGE_DIR=""
 
 MODULE_ENTRIES=(
     "action.sh"
+    "common.sh"
     "customize.sh"
     "lua"
     "module.prop"

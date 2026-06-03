@@ -464,10 +464,6 @@ body.ui-busy .icon-btn {
     gap: 3px;
 }
 
-.status-item-wide {
-    grid-column: 1 / -1;
-}
-
 .status-item-label {
     font-size: 10px;
     color: var(--text-tertiary);
@@ -1100,6 +1096,11 @@ body.ui-busy .icon-btn {
     word-break: break-word;
     border: 1px solid var(--border);
     border-bottom: none;
+    /* Isolate the scroller into its own composited layer so scrolling does not
+       force the blurred ancestor card to re-rasterize every frame. */
+    contain: paint;
+    transform: translateZ(0);
+    overscroll-behavior: contain;
 }
 
 .log-pane.active {
@@ -1120,6 +1121,11 @@ body.ui-busy .icon-btn {
     overflow-y: auto;
     border: 1px solid var(--border);
     border-bottom: none;
+    /* Isolate the scroller into its own composited layer so scrolling does not
+       force the blurred ancestor card to re-rasterize every frame. */
+    contain: paint;
+    transform: translateZ(0);
+    overscroll-behavior: contain;
 }
 
 .events-pane.active {
@@ -1235,6 +1241,10 @@ body.ui-busy .icon-btn {
     flex: 1 1 0;
     margin-bottom: 0;
     overflow: hidden;
+    /* The logs card hosts the scrolling panes; dropping its backdrop blur
+       removes per-frame backdrop re-rasterization while scrolling logs. */
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
 }
 
 #pageRuntime > .actions:last-child {
@@ -1530,25 +1540,6 @@ body.ui-busy .icon-btn {
     animation: cautionPulse 0.9s ease-in-out infinite;
 }
 
-@media (max-width: 420px) {
-    .private-dns-custom-row {
-        grid-template-columns: 1fr;
-    }
-
-    .private-dns-apply-btn {
-        width: 100%;
-    }
-
-    #diagCard .panel-head {
-        flex-direction: column;
-    }
-
-    #diagCard .diag-run-btn {
-        width: 100%;
-        justify-content: center;
-    }
-}
-
 @keyframes cautionPulse {
     0%, 100% { transform: scale(1); opacity: 1; }
     50% { transform: scale(1.08); opacity: 0.72; }
@@ -1573,6 +1564,19 @@ body.ui-busy .icon-btn {
 
     .private-dns-custom-row {
         grid-template-columns: 1fr;
+    }
+
+    .private-dns-apply-btn {
+        width: 100%;
+    }
+
+    #diagCard .panel-head {
+        flex-direction: column;
+    }
+
+    #diagCard .diag-run-btn {
+        width: 100%;
+        justify-content: center;
     }
 
     .diag-summary {
