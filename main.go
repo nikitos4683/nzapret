@@ -122,6 +122,8 @@ func serve() error {
 	logInfo("  Connect: %s", ddLink(cfg.host, cfg.port, cfg.secret))
 	logInfo("============================================================")
 
+	initCFDomains()
+
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -169,47 +171,87 @@ func handleClient(client net.Conn) {
 	ctx := buildCryptoCtx(prekeyIV, cfg.secret, relayInit)
 
 	target, inConfig := cfg.dcRedirects[dc]
+	sp := newSplitter(relayInit, protoInt)
 
-	if !inConfig {
-		logInfo("[%s] DC%d%s not in config -> TCP fallback", label, dc, mediaTag)
-		if !tcpFallback(client, relayInit, ctx, dc, label) {
-			logWarn("[%s] DC%d%s no fallback available", label, dc, mediaTag)
-		}
-		return
-	}
+	// Skip the direct-to-Telegram-IP path when the DC has no configured IP, or
+	// when that IP recently timed out (network-level block) — go straight to CF.
+	skipDirect := !inConfig || ipFailActive(target)
 
-	var ws *rawWebSocket
-	for _, domain := range wsDomains(dc, isMedia) {
-		logInfo("[%s] DC%d%s -> wss://%s/apiws via %s", label, dc, mediaTag, domain, target)
-		w, err := wsConnect(target, domain, "", "/apiws", 5*time.Second)
-		if err != nil {
-			if he, isHE := err.(*wsHandshakeError); isHE && he.isRedirect() {
-				logWarn("[%s] DC%d%s got %d from %s -> %s", label, dc, mediaTag, he.statusCode, domain, he.location)
+	if !skipDirect {
+		var ws *rawWebSocket
+		for _, domain := range wsDomains(dc, isMedia) {
+			logInfo("[%s] DC%d%s -> wss://%s/apiws via %s", label, dc, mediaTag, domain, target)
+			w, err := wsConnect(target, domain, "", "/apiws", 5*time.Second)
+			if err != nil {
+				if he, isHE := err.(*wsHandshakeError); isHE && he.isRedirect() {
+					logWarn("[%s] DC%d%s got %d from %s -> %s", label, dc, mediaTag, he.statusCode, domain, he.location)
+					continue
+				}
+				logWarn("[%s] DC%d%s WS connect failed: %v", label, dc, mediaTag, err)
 				continue
 			}
-			logWarn("[%s] DC%d%s WS connect failed: %v", label, dc, mediaTag, err)
-			continue
+			ws = w
+			break
 		}
-		ws = w
-		break
+		if ws != nil {
+			clearIPFail(target)
+			if err := ws.send(relayInit); err != nil {
+				logWarn("[%s] DC%d%s failed to send relay init: %v", label, dc, mediaTag, err)
+				ws.close()
+				return
+			}
+			logInfo("[%s] DC%d%s WS connected (direct)", label, dc, mediaTag)
+			bridgeWSReencrypt(client, ws, ctx, sp, label)
+			return
+		}
+		markIPFail(target)
+		logInfo("[%s] DC%d%s direct WS unavailable -> CF fallback", label, dc, mediaTag)
 	}
 
-	if ws == nil {
-		logInfo("[%s] DC%d%s WS unavailable -> TCP fallback", label, dc, mediaTag)
-		if !tcpFallback(client, relayInit, ctx, dc, label) {
-			logWarn("[%s] DC%d%s no fallback available", label, dc, mediaTag)
-		}
+	if tryCFFallback(client, relayInit, ctx, sp, dc, label) {
 		return
 	}
+	if tcpFallback(client, relayInit, ctx, dc, label) {
+		return
+	}
+	logWarn("[%s] DC%d%s no route available", label, dc, mediaTag)
+}
 
-	sp := newSplitter(relayInit, protoInt)
-	if err := ws.send(relayInit); err != nil {
-		logWarn("[%s] DC%d%s failed to send relay init: %v", label, dc, mediaTag, err)
-		ws.close()
+// IP-fail cooldown: once a DC's direct IP times out we stop retrying it for a
+// while and route straight through the CF fallback.
+const ipFailCooldown = time.Hour
+
+var (
+	failMu      sync.Mutex
+	ipFailUntil = map[string]time.Time{}
+)
+
+func ipFailActive(target string) bool {
+	if target == "" {
+		return false
+	}
+	failMu.Lock()
+	defer failMu.Unlock()
+	t, ok := ipFailUntil[target]
+	return ok && time.Now().Before(t)
+}
+
+func markIPFail(target string) {
+	if target == "" {
 		return
 	}
-	logInfo("[%s] DC%d%s WS connected", label, dc, mediaTag)
-	bridgeWSReencrypt(client, ws, ctx, sp, label)
+	failMu.Lock()
+	defer failMu.Unlock()
+	ipFailUntil[target] = time.Now().Add(ipFailCooldown)
+}
+
+func clearIPFail(target string) {
+	if target == "" {
+		return
+	}
+	failMu.Lock()
+	defer failMu.Unlock()
+	delete(ipFailUntil, target)
 }
 
 func drain(client net.Conn) {

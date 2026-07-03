@@ -65,7 +65,7 @@ func wsConnect(host, domain, sni, path string, timeout time.Duration) (*rawWebSo
 		dialTimeout = 10 * time.Second
 	}
 
-	dialer := &net.Dialer{Timeout: dialTimeout}
+	dialer := &net.Dialer{Timeout: dialTimeout, Resolver: dnsResolver}
 	rawConn, err := dialer.Dial("tcp", net.JoinHostPort(host, "443"))
 	if err != nil {
 		return nil, err
