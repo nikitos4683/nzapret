@@ -434,6 +434,13 @@ body.ui-busy .icon-btn {
 .status-label.on { color: var(--green); }
 .status-label.off { color: var(--red); }
 
+.status-badges {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
 .status-badge {
     padding: 7px 10px;
     border-radius: 999px;

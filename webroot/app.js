@@ -331,6 +331,7 @@ function renderStatusCard() {
 
     if (!currentStatus) {
         document.getElementById('pidBadge').textContent = 'PID --';
+        document.getElementById('tgPidBadge').hidden = true;
         document.getElementById('networkModeLabel').textContent = '--';
         document.getElementById('privateDnsLabel').textContent = '--';
         document.getElementById('tgStatusValue').textContent = '--';
@@ -353,11 +354,12 @@ function renderStatusCard() {
 
     document.getElementById('version').textContent = status.version || t('common.unknown');
     document.getElementById('pidBadge').textContent = pidCount > 1 ? `PID ${pid} +${pidCount - 1}` : `PID ${pid}`;
+    const tgPidBadge = document.getElementById('tgPidBadge');
+    tgPidBadge.hidden = !status.tg_active;
+    tgPidBadge.textContent = `nztg ${status.tg_pid || '--'}`;
     document.getElementById('networkModeLabel').textContent = getNetworkModeDisplayLabel(status);
     document.getElementById('privateDnsLabel').textContent = getPrivateDnsDisplayLabel(status);
-    document.getElementById('tgStatusValue').textContent = status.tg_active
-        ? `${t('status.on')} · PID ${status.tg_pid || '--'}`
-        : t('status.off');
+    document.getElementById('tgStatusValue').textContent = status.tg_active ? t('status.on') : t('status.off');
     document.getElementById('rulesV4').textContent = status.rules_v4 ?? 0;
     document.getElementById('rulesV6').textContent = status.rules_v6 ?? 0;
     document.getElementById('domainCount').textContent = formatNumber(status.domain_count ?? 0);
