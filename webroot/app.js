@@ -304,23 +304,23 @@ function getPrivateDnsNote(status = currentStatus) {
     const hostname = status && status.private_dns_hostname ? status.private_dns_hostname : defaultHost;
 
     switch (code) {
-    case 'unavailable':
-        return t('private_dns.status_unavailable');
-    case 'off':
-        return t('private_dns.status_off');
-    case 'hostname_default':
-        return t('private_dns.status_default_active', { hostname });
-    case 'hostname_custom':
-        return t('private_dns.status_custom_active', { hostname });
-    case 'hostname_unspecified':
-        return t('private_dns.status_custom_unspecified');
-    case 'auto':
-        if (status && status.private_dns_initialized === false) {
-            return t('private_dns.status_init_pending', { default_hostname: defaultHost });
-        }
-        return t('private_dns.status_auto');
-    default:
-        return t('private_dns.status_initial');
+        case 'unavailable':
+            return t('private_dns.status_unavailable');
+        case 'off':
+            return t('private_dns.status_off');
+        case 'hostname_default':
+            return t('private_dns.status_default_active', { hostname });
+        case 'hostname_custom':
+            return t('private_dns.status_custom_active', { hostname });
+        case 'hostname_unspecified':
+            return t('private_dns.status_custom_unspecified');
+        case 'auto':
+            if (status && status.private_dns_initialized === false) {
+                return t('private_dns.status_init_pending', { default_hostname: defaultHost });
+            }
+            return t('private_dns.status_auto');
+        default:
+            return t('private_dns.status_initial');
     }
 }
 
@@ -330,7 +330,7 @@ function renderStatusCard() {
     const label = document.getElementById('statusLabel');
 
     if (!currentStatus) {
-        document.getElementById('pidBadge').textContent = 'PID --';
+        document.getElementById('pidBadge').textContent = 'nfqws --';
         document.getElementById('tgPidBadge').hidden = true;
         document.getElementById('networkModeLabel').textContent = '--';
         document.getElementById('privateDnsLabel').textContent = '--';
@@ -353,13 +353,21 @@ function renderStatusCard() {
     const pidCount = parseInt(status.pid_count || 0, 10);
 
     document.getElementById('version').textContent = status.version || t('common.unknown');
-    document.getElementById('pidBadge').textContent = pidCount > 1 ? `PID ${pid} +${pidCount - 1}` : `PID ${pid}`;
+    document.getElementById('pidBadge').textContent = pidCount > 1 ? `nfqws ${pid} +${pidCount - 1}` : `nfqws ${pid}`;
     const tgPidBadge = document.getElementById('tgPidBadge');
     tgPidBadge.hidden = !status.tg_active;
     tgPidBadge.textContent = `nztg ${status.tg_pid || '--'}`;
     document.getElementById('networkModeLabel').textContent = getNetworkModeDisplayLabel(status);
     document.getElementById('privateDnsLabel').textContent = getPrivateDnsDisplayLabel(status);
-    document.getElementById('tgStatusValue').textContent = status.tg_active ? t('status.on') : t('status.off');
+    if (status.tg_active) {
+        const port = status.tg_port || '1443';
+        const isCf = Boolean(status.tg_cf_enabled);
+        document.getElementById('tgStatusValue').textContent = isCf
+            ? t('status.tg_port_cf', { port })
+            : t('status.tg_port', { port });
+    } else {
+        document.getElementById('tgStatusValue').textContent = t('status.off');
+    }
     document.getElementById('rulesV4').textContent = status.rules_v4 ?? 0;
     document.getElementById('rulesV6').textContent = status.rules_v6 ?? 0;
     document.getElementById('domainCount').textContent = formatNumber(status.domain_count ?? 0);
@@ -722,86 +730,86 @@ function toggleDiagnosticsDetails() {
 
 function getLocalizedDiagnoseName(check) {
     switch (check.code) {
-    case 'process':
-        return t('diagnostics.names.process', { subject: check.subject || 'nfqws2' });
-    case 'userlist_binding':
-        return t('diagnostics.names.userlist_binding');
-    case 'network_mode':
-        return t('diagnostics.names.network_mode');
-    case 'private_dns':
-        return t('diagnostics.names.private_dns');
-    case 'routing':
-        return check.family === 'ipv6'
-            ? t('diagnostics.names.routing_ipv6')
-            : t('diagnostics.names.routing_ipv4');
-    case 'jump_rule':
-        return check.table && check.hook ? `${check.table} ${check.hook}` : (check.name || '');
-    case 'command':
-    case 'ip6tables_runtime':
-    case 'runtime_file':
-        return check.subject || check.name || '';
-    default:
-        return check.name || '';
+        case 'process':
+            return t('diagnostics.names.process', { subject: check.subject || 'nfqws2' });
+        case 'userlist_binding':
+            return t('diagnostics.names.userlist_binding');
+        case 'network_mode':
+            return t('diagnostics.names.network_mode');
+        case 'private_dns':
+            return t('diagnostics.names.private_dns');
+        case 'routing':
+            return check.family === 'ipv6'
+                ? t('diagnostics.names.routing_ipv6')
+                : t('diagnostics.names.routing_ipv4');
+        case 'jump_rule':
+            return check.table && check.hook ? `${check.table} ${check.hook}` : (check.name || '');
+        case 'command':
+        case 'ip6tables_runtime':
+        case 'runtime_file':
+            return check.subject || check.name || '';
+        default:
+            return check.name || '';
     }
 }
 
 function getLocalizedDiagnoseDetail(check) {
     switch (check.code) {
-    case 'command':
-        if (check.detail_code === 'available') return t('diagnostics.details.command_available');
-        if (check.detail_code === 'missing') return t('diagnostics.details.command_missing');
-        break;
-    case 'ip6tables_runtime':
-        if (check.detail_code === 'not_required') return t('diagnostics.details.ip6tables_not_required');
-        if (check.detail_code === 'available') return t('diagnostics.details.ip6tables_available');
-        if (check.detail_code === 'unusable') return t('diagnostics.details.ip6tables_unusable');
-        if (check.detail_code === 'missing_fallback') return t('diagnostics.details.ip6tables_missing_fallback');
-        break;
-    case 'runtime_file':
-        if (check.detail_code === 'present') return t('diagnostics.details.runtime_file_present');
-        if (check.detail_code === 'missing') return t('diagnostics.details.runtime_file_missing');
-        break;
-    case 'process':
-        if (check.detail_code === 'running') return t('diagnostics.details.process_running', { pid: check.pid || '?' });
-        if (check.detail_code === 'not_running') return t('diagnostics.details.process_not_running');
-        break;
-    case 'userlist_binding':
-        if (check.detail_code === 'attached') return t('diagnostics.details.userlist_attached');
-        if (check.detail_code === 'detached') return t('diagnostics.details.userlist_detached');
-        break;
-    case 'network_mode':
-        if (check.detail_code === 'ipv4_only') return t('diagnostics.details.network_ipv4_only');
-        if (check.detail_code === 'auto_dual_stack') return t('diagnostics.details.network_auto_dual');
-        if (check.detail_code === 'auto_ipv4_fallback') return t('diagnostics.details.network_auto_fallback');
-        break;
-    case 'private_dns':
-        if (check.detail_code === 'unavailable') return t('diagnostics.details.private_dns_unavailable');
-        if (check.detail_code === 'off') return t('diagnostics.details.private_dns_off');
-        if (check.detail_code === 'auto') return t('diagnostics.details.private_dns_auto');
-        if (check.detail_code === 'hostname_default') {
-            return t('diagnostics.details.private_dns_hostname_default', {
-                hostname: check.hostname || check.default_hostname || getPrivateDnsDefaultHostname()
-            });
-        }
-        if (check.detail_code === 'hostname_custom') {
-            return t('diagnostics.details.private_dns_hostname_custom', {
-                hostname: check.hostname || '?'
-            });
-        }
-        if (check.detail_code === 'hostname_unspecified') return t('diagnostics.details.private_dns_hostname_unspecified');
-        break;
-    case 'jump_rule':
-        if (check.detail_code === 'present') return t('diagnostics.details.jump_present');
-        if (check.detail_code === 'missing') return t('diagnostics.details.jump_missing');
-        if (check.detail_code === 'skipped_ipv4_only') return t('diagnostics.details.jump_skipped_ipv4_only');
-        break;
-    case 'routing':
-        if (check.detail_code === 'ok') return t('diagnostics.details.routing_ok');
-        if (check.detail_code === 'fail') return t('diagnostics.details.routing_fail');
-        if (check.detail_code === 'disabled') return t('diagnostics.details.routing_disabled');
-        break;
-    default:
-        break;
+        case 'command':
+            if (check.detail_code === 'available') return t('diagnostics.details.command_available');
+            if (check.detail_code === 'missing') return t('diagnostics.details.command_missing');
+            break;
+        case 'ip6tables_runtime':
+            if (check.detail_code === 'not_required') return t('diagnostics.details.ip6tables_not_required');
+            if (check.detail_code === 'available') return t('diagnostics.details.ip6tables_available');
+            if (check.detail_code === 'unusable') return t('diagnostics.details.ip6tables_unusable');
+            if (check.detail_code === 'missing_fallback') return t('diagnostics.details.ip6tables_missing_fallback');
+            break;
+        case 'runtime_file':
+            if (check.detail_code === 'present') return t('diagnostics.details.runtime_file_present');
+            if (check.detail_code === 'missing') return t('diagnostics.details.runtime_file_missing');
+            break;
+        case 'process':
+            if (check.detail_code === 'running') return t('diagnostics.details.process_running', { pid: check.pid || '?' });
+            if (check.detail_code === 'not_running') return t('diagnostics.details.process_not_running');
+            break;
+        case 'userlist_binding':
+            if (check.detail_code === 'attached') return t('diagnostics.details.userlist_attached');
+            if (check.detail_code === 'detached') return t('diagnostics.details.userlist_detached');
+            break;
+        case 'network_mode':
+            if (check.detail_code === 'ipv4_only') return t('diagnostics.details.network_ipv4_only');
+            if (check.detail_code === 'auto_dual_stack') return t('diagnostics.details.network_auto_dual');
+            if (check.detail_code === 'auto_ipv4_fallback') return t('diagnostics.details.network_auto_fallback');
+            break;
+        case 'private_dns':
+            if (check.detail_code === 'unavailable') return t('diagnostics.details.private_dns_unavailable');
+            if (check.detail_code === 'off') return t('diagnostics.details.private_dns_off');
+            if (check.detail_code === 'auto') return t('diagnostics.details.private_dns_auto');
+            if (check.detail_code === 'hostname_default') {
+                return t('diagnostics.details.private_dns_hostname_default', {
+                    hostname: check.hostname || check.default_hostname || getPrivateDnsDefaultHostname()
+                });
+            }
+            if (check.detail_code === 'hostname_custom') {
+                return t('diagnostics.details.private_dns_hostname_custom', {
+                    hostname: check.hostname || '?'
+                });
+            }
+            if (check.detail_code === 'hostname_unspecified') return t('diagnostics.details.private_dns_hostname_unspecified');
+            break;
+        case 'jump_rule':
+            if (check.detail_code === 'present') return t('diagnostics.details.jump_present');
+            if (check.detail_code === 'missing') return t('diagnostics.details.jump_missing');
+            if (check.detail_code === 'skipped_ipv4_only') return t('diagnostics.details.jump_skipped_ipv4_only');
+            break;
+        case 'routing':
+            if (check.detail_code === 'ok') return t('diagnostics.details.routing_ok');
+            if (check.detail_code === 'fail') return t('diagnostics.details.routing_fail');
+            if (check.detail_code === 'disabled') return t('diagnostics.details.routing_disabled');
+            break;
+        default:
+            break;
     }
 
     return check.detail || '';
@@ -1222,16 +1230,16 @@ async function refreshStatus(force = false) {
 
 function getActionLabel(command) {
     switch (command) {
-    case 'start':
-        return t('actions.start');
-    case 'stop':
-        return t('actions.stop');
-    case 'restart':
-        return t('actions.restart');
-    case 'update':
-        return t('actions.update');
-    default:
-        return command;
+        case 'start':
+            return t('actions.start');
+        case 'stop':
+            return t('actions.stop');
+        case 'restart':
+            return t('actions.restart');
+        case 'update':
+            return t('actions.update');
+        default:
+            return command;
     }
 }
 

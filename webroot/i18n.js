@@ -36,6 +36,8 @@ const translations = {
             refresh_failed: 'Не удалось обновить статус',
             on: 'Вкл',
             off: 'Выкл',
+            tg_port: 'Порт {{port}}',
+            tg_port_cf: 'Порт {{port}} (CF)',
             labels: {
                 network_mode: 'Сетевой режим',
                 private_dns: 'Частный DNS',
@@ -300,6 +302,8 @@ const translations = {
             refresh_failed: 'Status refresh failed',
             on: 'On',
             off: 'Off',
+            tg_port: 'Port {{port}}',
+            tg_port_cf: 'Port {{port}} (CF)',
             labels: {
                 network_mode: 'Network Mode',
                 private_dns: 'Private DNS',

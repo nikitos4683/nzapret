@@ -716,9 +716,12 @@ print_status_json() {
         _tg_active=false
     fi
     _tg_pid=$(tg_pid)
+    _tg_port=$(get_tg_conf port "$DEFAULT_TG_PORT")
+    _tg_cf=$(get_tg_conf cf_enabled 1)
+    if [ "$_tg_cf" = "0" ]; then _tg_cf_enabled=false; else _tg_cf_enabled=true; fi
 
-    printf '{"version":"%s","active":%s,"pid":"%s","pid_count":%s,"rules_v4":%s,"rules_v6":%s,"domain_count":%s,"google_domain_count":%s,"user_domain_count":%s,"user_list_attached":%s,"profile":"%s","profile_label":"%s","network_mode":"%s","network_mode_label":"%s","ipv6_available":%s,"ipv6_enabled":%s,"private_dns_available":%s,"private_dns_initialized":%s,"private_dns_mode":"%s","private_dns_mode_label":"%s","private_dns_hostname":"%s","private_dns_label":"%s","private_dns_default_hostname":"%s","tg_active":%s,"tg_pid":"%s"}\n' \
-        "$(json_escape "$_ver")" "$_active" "$(json_escape "$_pid")" "$_pid_count" "$_rules" "$_rules6" "$_lc" "$_google_lc" "$_user_lc" "$_user_attached" "$(json_escape "$_prof_name")" "$(json_escape "$_prof_label")" "$(json_escape "$_network_mode")" "$(json_escape "$_network_mode_label")" "$_ipv6_available" "$_ipv6_enabled" "$_private_dns_available" "$_private_dns_initialized" "$(json_escape "$_private_dns_mode")" "$(json_escape "$_private_dns_mode_label")" "$(json_escape "$_private_dns_hostname")" "$(json_escape "$_private_dns_label")" "$(json_escape "$DEFAULT_PRIVATE_DNS_HOSTNAME")" "$_tg_active" "$(json_escape "$_tg_pid")"
+    printf '{"version":"%s","active":%s,"pid":"%s","pid_count":%s,"rules_v4":%s,"rules_v6":%s,"domain_count":%s,"google_domain_count":%s,"user_domain_count":%s,"user_list_attached":%s,"profile":"%s","profile_label":"%s","network_mode":"%s","network_mode_label":"%s","ipv6_available":%s,"ipv6_enabled":%s,"private_dns_available":%s,"private_dns_initialized":%s,"private_dns_mode":"%s","private_dns_mode_label":"%s","private_dns_hostname":"%s","private_dns_label":"%s","private_dns_default_hostname":"%s","tg_active":%s,"tg_pid":"%s","tg_port":"%s","tg_cf_enabled":%s}\n' \
+        "$(json_escape "$_ver")" "$_active" "$(json_escape "$_pid")" "$_pid_count" "$_rules" "$_rules6" "$_lc" "$_google_lc" "$_user_lc" "$_user_attached" "$(json_escape "$_prof_name")" "$(json_escape "$_prof_label")" "$(json_escape "$_network_mode")" "$(json_escape "$_network_mode_label")" "$_ipv6_available" "$_ipv6_enabled" "$_private_dns_available" "$_private_dns_initialized" "$(json_escape "$_private_dns_mode")" "$(json_escape "$_private_dns_mode_label")" "$(json_escape "$_private_dns_hostname")" "$(json_escape "$_private_dns_label")" "$(json_escape "$DEFAULT_PRIVATE_DNS_HOSTNAME")" "$_tg_active" "$(json_escape "$_tg_pid")" "$(json_escape "$_tg_port")" "$_tg_cf_enabled"
 }
 
 get_rule_count() {
@@ -1596,8 +1599,10 @@ case "$1" in
                     exit 1
                 }
                 _cfd=$(get_tg_conf cf_domain "")
+                _json_arg=""
+                [ "$3" = "--json" ] && _json_arg="--json"
                 set --
-                [ "$3" = "--json" ] && set -- --json
+                [ -n "$_json_arg" ] && set -- "$_json_arg"
                 if [ -n "$_cfd" ]; then
                     "$NZTG_BIN" cftest "$@" --domain "$_cfd"
                 else
