@@ -37,6 +37,12 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
   - Upstream `nfqws2` helper libraries loaded by profiles via `--lua-init`.
 - `bin/nfqws2-*`
   - Architecture-specific binaries. `customize.sh` renames the selected one to `bin/nfqws2` during install.
+- `bin/nztg-*`
+  - Architecture-specific Telegram MTProto proxy binaries (a static, CGO-free Go port of tg-ws-proxy; sources live on the `nztg` branch). `customize.sh` renames the selected one to `bin/nztg` during install and keeps it (not deleted alongside the other arch binaries).
+- `tgproxy.conf`
+  - Mutable Telegram proxy config (`host`, `port`, `cf_enabled`, `cf_domain`, repeated `dc=` rules). Created with original defaults on first run; not shipped; preserved across updates.
+- `.tg_secret`
+  - Mutable MTProto secret (32 hex), owned by `bin/nztg --secret-file`. Not shipped; preserved across updates.
 - `webroot/`
   - KernelSU WebUI (`index.html`, `style.css`, `kernelsu.js`).
 - `META-INF/com/google/android/*`
@@ -96,6 +102,13 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
   - Manual CLI/WebUI DNS changes (`off`, `auto`, `default`, or custom `hostname`) mark Private DNS initialized and must not be overwritten on later starts.
   - Use Android global settings carefully: `private_dns_mode`, `private_dns_default_mode`, and `private_dns_specifier`. Android automatic mode is represented as `opportunistic`.
 
+- Preserve the Telegram proxy (nztgproxy) lifecycle and contract.
+  - Lifecycle is unified: `nzapret start`/`stop`/`restart` control both `nfqws2` and `nztg`. `service.sh` launches `nztg` after `nfqws2` (non-fatal — DPI must still come up); `uninstall.sh` and `stop_service` stop it (`killall nztg`).
+  - `service.sh` builds the `nztg` argument list from `tgproxy.conf` via `tg_build_args` (shared in `common.sh`). Config values are space-free and CLI-validated; the args are intentionally word-split.
+  - The proxy is client-configured, not transparently redirected: users connect via the `tg://proxy?...&secret=dd...` link (WebUI "Open in Telegram" runs `am start`). Do not add iptables redirection for Telegram.
+  - Defaults must match the reference: DC `2:149.154.167.220` and `4:149.154.167.220`, CF enabled, port 1443, host 127.0.0.1, random secret. Keep `ensure_tgproxy_conf` (`common.sh`) in sync with the Go binary defaults.
+  - The Go binary and the module are coupled: `--no-cfproxy`/`--cfproxy-domain` flags and the `gensecret`/`cftest` subcommands back the CLI `tg` commands. Rebuild `bin/nztg-*` from the `nztg` branch when the engine changes.
+
 - Preserve the CLI/WebUI JSON contract.
   - `nzapret status --json` currently returns:
     - `version`
@@ -121,6 +134,8 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
     - `private_dns_hostname`
     - `private_dns_label`
     - `private_dns_default_hostname`
+    - `tg_active`
+  - `nzapret tg status --json` returns the Telegram proxy config/state (`host`, `port`, `secret`, `link`, `dc_redirects[]`, `cf_enabled`, `cf_domain`, `active`, `pid`) and is consumed by the WebUI Telegram card.
   - `nzapret diagnose --json` and `nzapret events --json` are also consumed by the UI.
   - If JSON schemas or command names change, update the WebUI in the same change.
 
@@ -152,7 +167,7 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
 - Runtime state is generated inside the module directory.
   - `profiles/profile.current`, `profiles/network.mode`, `.private_dns_initialized`, `.list_count`, `nzapret.log`, `nzapret.log.prev`, and `nzapret-events.log` are mutable artifacts.
   - Do not hardcode assumptions that these files are committed or always present in a fresh checkout.
-  - `customize.sh` preserves `lists/list-user.txt` and `profiles/network.mode` across module updates from both live and staged module directories.
+  - `customize.sh` preserves `lists/list-user.txt`, `profiles/network.mode`, `tgproxy.conf`, and `.tg_secret` across module updates from both live and staged module directories.
 
 - The update path is intentionally narrow.
   - `system/bin/nzapret update` refreshes `lists/list-general.txt` from the hardcoded upstream URL.
