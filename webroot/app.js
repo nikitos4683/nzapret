@@ -331,7 +331,7 @@ function renderStatusCard() {
 
     if (!currentStatus) {
         document.getElementById('pidBadge').textContent = 'nfqws --';
-        document.getElementById('tgPidBadge').hidden = true;
+        document.getElementById('tgPidBadge').textContent = 'nztg --';
         document.getElementById('networkModeLabel').textContent = '--';
         document.getElementById('privateDnsLabel').textContent = '--';
         document.getElementById('tgStatusValue').textContent = '--';
@@ -355,7 +355,6 @@ function renderStatusCard() {
     document.getElementById('version').textContent = status.version || t('common.unknown');
     document.getElementById('pidBadge').textContent = pidCount > 1 ? `nfqws ${pid} +${pidCount - 1}` : `nfqws ${pid}`;
     const tgPidBadge = document.getElementById('tgPidBadge');
-    tgPidBadge.hidden = !status.tg_active;
     tgPidBadge.textContent = `nztg ${status.tg_pid || '--'}`;
     document.getElementById('networkModeLabel').textContent = getNetworkModeDisplayLabel(status);
     document.getElementById('privateDnsLabel').textContent = getPrivateDnsDisplayLabel(status);
