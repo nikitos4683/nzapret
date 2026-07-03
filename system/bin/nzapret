@@ -637,6 +637,15 @@ print_status_human() {
         echo "nfqws2: [OFF]"
     fi
 
+    _tgpid=$(tg_pid)
+    _tg_pid_count=$(tg_pid_count)
+    if [ -n "$_tgpid" ]; then
+        echo "nztg: [ON] (PID: $_tgpid)"
+        [ "$_tg_pid_count" -gt 1 ] && echo "warning: multiple nztg processes detected ($_tg_pid_count)"
+    else
+        echo "nztg: [OFF]"
+    fi
+
     echo "iptables rules: $_rules (IPv4), $_rules6 (IPv6)"
     print_network_mode_status
     echo "Private DNS: $(get_private_dns_status_summary)"
@@ -785,6 +794,16 @@ tg_pid() {
 
 tg_active() {
     [ -n "$(tg_pid)" ]
+}
+
+tg_pid_count() {
+    _count=0
+    for _pid in $(pgrep -x "$TG_PROCESS_NAME" 2>/dev/null); do
+        if is_live_pid "$_pid"; then
+            _count=$((_count + 1))
+        fi
+    done
+    echo "$_count"
 }
 
 ensure_tg_secret() {
@@ -1031,6 +1050,13 @@ run_diagnose() {
         print_human_check fail "$PROCESS_NAME is not running"
     fi
 
+    _tgpid=$(tg_pid)
+    if [ -n "$_tgpid" ]; then
+        print_human_check ok "$TG_PROCESS_NAME running (PID: $_tgpid)"
+    else
+        print_human_check fail "$TG_PROCESS_NAME is not running"
+    fi
+
     if active_profile_uses_user_list; then
         print_human_check ok "current configuration includes list-user.txt"
     else
@@ -1121,6 +1147,13 @@ run_diagnose_json() {
         append_json_check "$PROCESS_NAME process" "ok" "running (pid: $_pid)" "process" "running" "$PROCESS_NAME" "" "" "" "" "$_pid"
     else
         append_json_check "$PROCESS_NAME process" "fail" "not running" "process" "not_running" "$PROCESS_NAME"
+    fi
+
+    _tgpid=$(tg_pid)
+    if [ -n "$_tgpid" ]; then
+        append_json_check "$TG_PROCESS_NAME process" "ok" "running (pid: $_tgpid)" "process" "running" "$TG_PROCESS_NAME" "" "" "" "" "$_tgpid"
+    else
+        append_json_check "$TG_PROCESS_NAME process" "fail" "not running" "process" "not_running" "$TG_PROCESS_NAME"
     fi
 
     if active_profile_uses_user_list; then
