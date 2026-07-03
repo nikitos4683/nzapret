@@ -151,17 +151,15 @@ func tryCFFallback(client net.Conn, relayInit []byte, ctx *cryptoCtx, sp *splitt
 		domain := fmt.Sprintf("kws%d.%s", dc, base)
 		ws, err := wsConnect(domain, domain, "", "/apiws", 10*time.Second)
 		if err != nil {
-			logWarn("[%s] DC%d CF proxy %s failed: %v", label, dc, domain, err)
+			logDebug("[%s] DC%d CF proxy %s failed: %v", label, dc, domain, err)
 			continue
 		}
-		if balancer.updateDomainForDC(dc, base) {
-			logInfo("[%s] switched active CF domain to %s", label, base)
-		}
-		logInfo("[%s] DC%d -> CF proxy via %s", label, dc, domain)
+		balancer.updateDomainForDC(dc, base)
 		if err := ws.send(relayInit); err != nil {
 			ws.close()
 			continue
 		}
+		logRoute(dc, "Cloudflare ("+domain+")")
 		bridgeWSReencrypt(client, ws, ctx, sp, label)
 		return true
 	}

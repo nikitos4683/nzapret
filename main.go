@@ -175,7 +175,7 @@ func handleClient(client net.Conn) {
 
 	dc, isMedia, protoTag, prekeyIV, ok := tryHandshake(handshake, cfg.secret)
 	if !ok {
-		logWarn("[%s] bad handshake (wrong secret or proto)", label)
+		logDebug("[%s] bad handshake (wrong secret or proto)", label)
 		drain(client)
 		return
 	}
@@ -202,14 +202,14 @@ func handleClient(client net.Conn) {
 	if !skipDirect {
 		var ws *rawWebSocket
 		for _, domain := range wsDomains(dc, isMedia) {
-			logInfo("[%s] DC%d%s -> wss://%s/apiws via %s", label, dc, mediaTag, domain, target)
+			logDebug("[%s] DC%d%s -> wss://%s/apiws via %s", label, dc, mediaTag, domain, target)
 			w, err := wsConnect(target, domain, "", "/apiws", 5*time.Second)
 			if err != nil {
 				if he, isHE := err.(*wsHandshakeError); isHE && he.isRedirect() {
-					logWarn("[%s] DC%d%s got %d from %s -> %s", label, dc, mediaTag, he.statusCode, domain, he.location)
+					logDebug("[%s] DC%d%s got %d from %s -> %s", label, dc, mediaTag, he.statusCode, domain, he.location)
 					continue
 				}
-				logWarn("[%s] DC%d%s WS connect failed: %v", label, dc, mediaTag, err)
+				logDebug("[%s] DC%d%s WS connect failed: %v", label, dc, mediaTag, err)
 				continue
 			}
 			ws = w
@@ -218,16 +218,16 @@ func handleClient(client net.Conn) {
 		if ws != nil {
 			clearIPFail(target)
 			if err := ws.send(relayInit); err != nil {
-				logWarn("[%s] DC%d%s failed to send relay init: %v", label, dc, mediaTag, err)
+				logDebug("[%s] DC%d%s failed to send relay init: %v", label, dc, mediaTag, err)
 				ws.close()
 				return
 			}
-			logInfo("[%s] DC%d%s WS connected (direct)", label, dc, mediaTag)
+			logRoute(dc, "direct WS")
 			bridgeWSReencrypt(client, ws, ctx, sp, label)
 			return
 		}
 		markIPFail(target)
-		logInfo("[%s] DC%d%s direct WS unavailable -> CF fallback", label, dc, mediaTag)
+		logDebug("[%s] DC%d%s direct WS unavailable -> CF fallback", label, dc, mediaTag)
 	}
 
 	if cfg.fallbackCF && tryCFFallback(client, relayInit, ctx, sp, dc, label) {
@@ -236,7 +236,26 @@ func handleClient(client net.Conn) {
 	if tcpFallback(client, relayInit, ctx, dc, label) {
 		return
 	}
-	logWarn("[%s] DC%d%s no route available", label, dc, mediaTag)
+	logRoute(dc, "unavailable (no route)")
+}
+
+// logRoute logs a concise INFO line only when a DC's effective route changes,
+// so a busy session doesn't flood the log with per-connection chatter.
+var (
+	routeMu    sync.Mutex
+	routeState = map[int]string{}
+)
+
+func logRoute(dc int, desc string) {
+	routeMu.Lock()
+	changed := routeState[dc] != desc
+	if changed {
+		routeState[dc] = desc
+	}
+	routeMu.Unlock()
+	if changed {
+		logInfo("DC%d route: %s", dc, desc)
+	}
 }
 
 // IP-fail cooldown: once a DC's direct IP times out we stop retrying it for a

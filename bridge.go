@@ -119,18 +119,18 @@ func tcpFallback(client net.Conn, relayInit []byte, ctx *cryptoCtx, dc int, labe
 	}
 	remote, err := net.DialTimeout("tcp", net.JoinHostPort(dst, "443"), 10*time.Second)
 	if err != nil {
-		logWarn("[%s] TCP fallback to %s:443 failed: %v", label, dst, err)
+		logDebug("[%s] TCP fallback to %s:443 failed: %v", label, dst, err)
 		return false
 	}
 	if tc, ok := remote.(*net.TCPConn); ok {
 		_ = tc.SetNoDelay(true)
 	}
-	logInfo("[%s] DC%d -> TCP fallback to %s:443", label, dc, dst)
 
 	if _, err := remote.Write(relayInit); err != nil {
 		remote.Close()
 		return false
 	}
+	logRoute(dc, "direct TCP ("+dst+")")
 
 	var once sync.Once
 	stop := func() {
