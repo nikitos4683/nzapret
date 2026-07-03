@@ -14,6 +14,12 @@ LUA_DIR="$MODDIR/lua"
 PAYLOAD_QUIC_FILE="$PAYLOADS/quic_initial_www_google_com.bin"
 PAYLOAD_TLS_FILE="$PAYLOADS/tls_clienthello_www_google_com.bin"
 BIN="$MODDIR/bin/nfqws2"
+NZTG_BIN="$MODDIR/bin/nztg"
+TGPROXY_CONF="$MODDIR/tgproxy.conf"
+TG_SECRET_FILE="$MODDIR/.tg_secret"
+TG_LINK_FILE="$MODDIR/.tg_link"
+TG_LOGFILE="$MODDIR/nztg.log"
+TG_PROCESS_NAME="nztg"
 CHAIN="nzapret_out"
 LOGFILE="$MODDIR/nzapret.log"
 EVENTLOG="$MODDIR/nzapret-events.log"
@@ -704,9 +710,14 @@ print_status_json() {
     else
         _private_dns_initialized=false
     fi
+    if tg_active; then
+        _tg_active=true
+    else
+        _tg_active=false
+    fi
 
-    printf '{"version":"%s","active":%s,"pid":"%s","pid_count":%s,"rules_v4":%s,"rules_v6":%s,"domain_count":%s,"google_domain_count":%s,"user_domain_count":%s,"user_list_attached":%s,"profile":"%s","profile_label":"%s","network_mode":"%s","network_mode_label":"%s","ipv6_available":%s,"ipv6_enabled":%s,"private_dns_available":%s,"private_dns_initialized":%s,"private_dns_mode":"%s","private_dns_mode_label":"%s","private_dns_hostname":"%s","private_dns_label":"%s","private_dns_default_hostname":"%s"}\n' \
-        "$(json_escape "$_ver")" "$_active" "$(json_escape "$_pid")" "$_pid_count" "$_rules" "$_rules6" "$_lc" "$_google_lc" "$_user_lc" "$_user_attached" "$(json_escape "$_prof_name")" "$(json_escape "$_prof_label")" "$(json_escape "$_network_mode")" "$(json_escape "$_network_mode_label")" "$_ipv6_available" "$_ipv6_enabled" "$_private_dns_available" "$_private_dns_initialized" "$(json_escape "$_private_dns_mode")" "$(json_escape "$_private_dns_mode_label")" "$(json_escape "$_private_dns_hostname")" "$(json_escape "$_private_dns_label")" "$(json_escape "$DEFAULT_PRIVATE_DNS_HOSTNAME")"
+    printf '{"version":"%s","active":%s,"pid":"%s","pid_count":%s,"rules_v4":%s,"rules_v6":%s,"domain_count":%s,"google_domain_count":%s,"user_domain_count":%s,"user_list_attached":%s,"profile":"%s","profile_label":"%s","network_mode":"%s","network_mode_label":"%s","ipv6_available":%s,"ipv6_enabled":%s,"private_dns_available":%s,"private_dns_initialized":%s,"private_dns_mode":"%s","private_dns_mode_label":"%s","private_dns_hostname":"%s","private_dns_label":"%s","private_dns_default_hostname":"%s","tg_active":%s}\n' \
+        "$(json_escape "$_ver")" "$_active" "$(json_escape "$_pid")" "$_pid_count" "$_rules" "$_rules6" "$_lc" "$_google_lc" "$_user_lc" "$_user_attached" "$(json_escape "$_prof_name")" "$(json_escape "$_prof_label")" "$(json_escape "$_network_mode")" "$(json_escape "$_network_mode_label")" "$_ipv6_available" "$_ipv6_enabled" "$_private_dns_available" "$_private_dns_initialized" "$(json_escape "$_private_dns_mode")" "$(json_escape "$_private_dns_mode_label")" "$(json_escape "$_private_dns_hostname")" "$(json_escape "$_private_dns_label")" "$(json_escape "$DEFAULT_PRIVATE_DNS_HOSTNAME")" "$_tg_active"
 }
 
 get_rule_count() {
@@ -763,6 +774,136 @@ run_uninstall_cleanup() {
     "$MODDIR/uninstall.sh" >/dev/null 2>&1 || true
 }
 
+# Telegram proxy (nztgproxy)
+tg_pid() {
+    pgrep -x "$TG_PROCESS_NAME" 2>/dev/null | head -n 1
+}
+
+tg_active() {
+    [ -n "$(tg_pid)" ]
+}
+
+ensure_tg_secret() {
+    [ -f "$TG_SECRET_FILE" ] && [ -s "$TG_SECRET_FILE" ] && return 0
+    [ -f "$NZTG_BIN" ] || return 1
+    "$NZTG_BIN" gensecret > "$TG_SECRET_FILE" 2>/dev/null || return 1
+    chmod 600 "$TG_SECRET_FILE" 2>/dev/null
+}
+
+get_tg_secret() {
+    ensure_tg_secret || return 1
+    head -n 1 "$TG_SECRET_FILE" 2>/dev/null | tr -d '\r\n'
+}
+
+get_tg_link() {
+    _tgh=$(get_tg_conf host "$DEFAULT_TG_HOST")
+    _tgp=$(get_tg_conf port "$DEFAULT_TG_PORT")
+    _tgs=$(get_tg_secret) || return 1
+    printf 'tg://proxy?server=%s&port=%s&secret=dd%s' "$_tgh" "$_tgp" "$_tgs"
+}
+
+# Validate a multi-line DC->IP ruleset (one "n:IP" per line). Prints cleaned
+# rules on success; returns 1 on any invalid line.
+validate_tg_dc_rules() {
+    _clean=""
+    while IFS= read -r _line || [ -n "$_line" ]; do
+        _line=$(printf '%s' "$_line" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+        [ -n "$_line" ] || continue
+        case "$_line" in
+            \#*) continue ;;
+        esac
+        _num="${_line%%:*}"
+        _ip="${_line#*:}"
+        case "$_num" in
+            ''|*[!0-9]*) return 1 ;;
+        esac
+        case "$_ip" in
+            *[!0-9.]*|'') return 1 ;;
+        esac
+        _clean="${_clean}${_line}
+"
+    done
+    printf '%s' "$_clean"
+}
+
+# Rewrite a single-value key in tgproxy.conf, preserving the rest.
+tg_set_single() {
+    _sk="$1"; _sv="$2"
+    ensure_tgproxy_conf
+    _stmp=$(make_temp_file) || return 1
+    grep -v "^$_sk=" "$TGPROXY_CONF" 2>/dev/null > "$_stmp"
+    printf '%s=%s\n' "$_sk" "$_sv" >> "$_stmp"
+    mv -f "$_stmp" "$TGPROXY_CONF"
+}
+
+# Replace all dc= rules with the given cleaned (newline-separated) ruleset.
+tg_set_dc() {
+    _rules="$1"
+    ensure_tgproxy_conf
+    _dtmp=$(make_temp_file) || return 1
+    grep -v "^dc=" "$TGPROXY_CONF" 2>/dev/null > "$_dtmp"
+    printf '%s' "$_rules" | while IFS= read -r _r || [ -n "$_r" ]; do
+        [ -n "$_r" ] && printf 'dc=%s\n' "$_r" >> "$_dtmp"
+    done
+    mv -f "$_dtmp" "$TGPROXY_CONF"
+}
+
+print_tg_status() {
+    ensure_tgproxy_conf
+    if tg_active; then
+        echo "nztgproxy: [ON] (PID: $(tg_pid))"
+    else
+        echo "nztgproxy: [OFF]"
+    fi
+    echo "Host: $(get_tg_conf host "$DEFAULT_TG_HOST")"
+    echo "Port: $(get_tg_conf port "$DEFAULT_TG_PORT")"
+    echo "Secret: $(get_tg_secret)"
+    echo "Link: $(get_tg_link)"
+    if [ "$(get_tg_conf cf_enabled 1)" = "0" ]; then
+        echo "Cloudflare proxy: disabled"
+    else
+        _cfd=$(get_tg_conf cf_domain "")
+        if [ -n "$_cfd" ]; then
+            echo "Cloudflare proxy: enabled (custom: $_cfd)"
+        else
+            echo "Cloudflare proxy: enabled (auto domains)"
+        fi
+    fi
+    echo "Datacenters:"
+    get_tg_dc_lines | while IFS= read -r _d; do
+        [ -n "$_d" ] && echo "  $_d"
+    done
+}
+
+print_tg_status_json() {
+    ensure_tgproxy_conf
+    _h=$(get_tg_conf host "$DEFAULT_TG_HOST")
+    _p=$(get_tg_conf port "$DEFAULT_TG_PORT")
+    _cf=$(get_tg_conf cf_enabled 1)
+    _cfd=$(get_tg_conf cf_domain "")
+    _sec=$(get_tg_secret)
+    _link=$(get_tg_link)
+    if [ "$_cf" = "0" ]; then _cfb=false; else _cfb=true; fi
+    if tg_active; then _act=true; else _act=false; fi
+    _tpid=$(tg_pid)
+    _dcs=$(get_tg_dc_lines | while IFS= read -r _d; do
+        [ -n "$_d" ] && printf '"%s",' "$(json_escape "$_d")"
+    done)
+    _dcs=${_dcs%,}
+    printf '{"host":"%s","port":"%s","secret":"%s","link":"%s","dc_redirects":[%s],"cf_enabled":%s,"cf_domain":"%s","active":%s,"pid":"%s"}\n' \
+        "$(json_escape "$_h")" "$(json_escape "$_p")" "$(json_escape "$_sec")" "$(json_escape "$_link")" "$_dcs" "$_cfb" "$(json_escape "$_cfd")" "$_act" "$(json_escape "$_tpid")"
+}
+
+stop_tgproxy() {
+    killall "$TG_PROCESS_NAME" 2>/dev/null
+    _tg_tries=15
+    while tg_active && [ "$_tg_tries" -gt 0 ]; do
+        sleep 0.1 2>/dev/null || sleep 1
+        _tg_tries=$((_tg_tries - 1))
+    done
+    tg_active && killall -9 "$TG_PROCESS_NAME" 2>/dev/null
+}
+
 # Service control
 start_service() {
     "$MODDIR/service.sh" manual || return 1
@@ -771,6 +912,7 @@ start_service() {
 
 stop_service() {
     run_uninstall_cleanup
+    stop_tgproxy
 
     if ! wait_for_process_exit 15; then
         killall -9 "$PROCESS_NAME" 2>/dev/null
@@ -1401,6 +1543,112 @@ case "$1" in
         fi
         ;;
 
+    "tg")
+        case "$2" in
+            ""|"status")
+                if [ "$3" = "--json" ]; then
+                    print_tg_status_json
+                else
+                    print_tg_status
+                fi
+                ;;
+            "link")
+                get_tg_link || {
+                    echo "[-] Failed to build link"
+                    exit 1
+                }
+                echo ""
+                ;;
+            "open")
+                _tglink=$(get_tg_link) || {
+                    echo "[-] Failed to build link"
+                    exit 1
+                }
+                if am start -a android.intent.action.VIEW -d "$_tglink" >/dev/null 2>&1; then
+                    echo "[+] Opening Telegram..."
+                else
+                    echo "[-] Failed to launch Telegram"
+                    exit 1
+                fi
+                ;;
+            "regen-secret")
+                [ -f "$NZTG_BIN" ] || {
+                    echo "[-] nztg binary missing"
+                    exit 1
+                }
+                _newsec=$("$NZTG_BIN" gensecret 2>/dev/null) || {
+                    echo "[-] Failed to generate secret"
+                    exit 1
+                }
+                printf '%s\n' "$_newsec" > "$TG_SECRET_FILE" || {
+                    echo "[-] Failed to save secret"
+                    exit 1
+                }
+                chmod 600 "$TG_SECRET_FILE" 2>/dev/null
+                log_event TGPROXY "secret regenerated"
+                echo "[+] New secret: $_newsec"
+                echo "[*] Restart nzapret to apply changes"
+                ;;
+            "cf-test")
+                [ -f "$NZTG_BIN" ] || {
+                    echo "[-] nztg binary missing"
+                    exit 1
+                }
+                _cfd=$(get_tg_conf cf_domain "")
+                set --
+                [ "$3" = "--json" ] && set -- --json
+                if [ -n "$_cfd" ]; then
+                    "$NZTG_BIN" cftest "$@" --domain "$_cfd"
+                else
+                    "$NZTG_BIN" cftest "$@"
+                fi
+                ;;
+            "set")
+                case "$3" in
+                    "host")
+                        [ -n "$4" ] || { echo "Usage: nzapret tg set host <ip>"; exit 1; }
+                        tg_set_single host "$4" || { echo "[-] Failed to save"; exit 1; }
+                        ;;
+                    "port")
+                        case "$4" in
+                            ''|*[!0-9]*) echo "[-] Port must be numeric"; exit 1 ;;
+                        esac
+                        tg_set_single port "$4" || { echo "[-] Failed to save"; exit 1; }
+                        ;;
+                    "cf")
+                        case "$4" in
+                            on|1|true|enabled)  _cfv=1 ;;
+                            off|0|false|disabled) _cfv=0 ;;
+                            *) echo "Usage: nzapret tg set cf <on|off>"; exit 1 ;;
+                        esac
+                        tg_set_single cf_enabled "$_cfv" || { echo "[-] Failed to save"; exit 1; }
+                        ;;
+                    "cf-domain")
+                        tg_set_single cf_domain "$4" || { echo "[-] Failed to save"; exit 1; }
+                        ;;
+                    "dc")
+                        _dcclean=$(printf '%s\n' "$4" | validate_tg_dc_rules) || {
+                            echo "[-] Invalid DC rules (expected 'number:IP' per line)"
+                            exit 1
+                        }
+                        tg_set_dc "$_dcclean" || { echo "[-] Failed to save"; exit 1; }
+                        ;;
+                    *)
+                        echo "Usage: nzapret tg set <host|port|cf|cf-domain|dc> <value>"
+                        exit 1
+                        ;;
+                esac
+                log_event TGPROXY "config updated ($3)"
+                echo "[+] Saved"
+                echo "[*] Restart nzapret to apply changes"
+                ;;
+            *)
+                echo "Usage: nzapret tg [status [--json]|set <key> <value>|link|open|regen-secret|cf-test [--json]]"
+                exit 1
+                ;;
+        esac
+        ;;
+
     "help"|"--help"|"-h"|*)
         echo "nzapret Management Utility (Magisk)"
         echo "Usage: nzapret <command> [options]"
@@ -1419,6 +1667,7 @@ case "$1" in
         echo "  network <subcommand>        - configure auto or IPv4-only firewall mode"
         echo "  dns <subcommand>            - manage Android Private DNS"
         echo "  list-user <subcommand>      - manage the personal domain hostlist"
+        echo "  tg <subcommand>             - manage the Telegram MTProto proxy"
         echo "  diagnose                    - run Android-side diagnostics"
         echo "  diagnose --json             - diagnostics as JSON for WebUI"
         echo "  help                        - show this help message"
@@ -1426,5 +1675,6 @@ case "$1" in
         echo "Network commands: status, set <auto|ipv4-only>"
         echo "DNS commands: status, set <off|auto|default>, set hostname <fqdn>"
         echo "User list commands: status, show, add, remove, replace, clear"
+        echo "Telegram commands: status [--json], set <host|port|cf|cf-domain|dc>, link, open, regen-secret, cf-test"
         ;;
 esac

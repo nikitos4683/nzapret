@@ -56,6 +56,7 @@ write_stop_event() {
 
 # Best-effort process stop first, then firewall cleanup below.
 killall "$PROCESS_NAME" 2>/dev/null
+killall "nztg" 2>/dev/null
 
 if has_cmd iptables; then
     cleanup_tables

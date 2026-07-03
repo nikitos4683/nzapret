@@ -13,6 +13,10 @@ LIVE_MODULE_DIR="/data/adb/modules/$MODULE_ID"
 UPDATE_MODULE_DIR="/data/adb/modules_update/$MODULE_ID"
 PRESERVED_USER_LIST_FILE="$MODPATH/.list-user.install.bak"
 PRESERVED_NETWORK_MODE_FILE="$MODPATH/.network-mode.install.bak"
+TGPROXY_CONF_FILE="$MODPATH/tgproxy.conf"
+TG_SECRET_FILE="$MODPATH/.tg_secret"
+PRESERVED_TGPROXY_CONF="$MODPATH/.tgproxy.conf.install.bak"
+PRESERVED_TG_SECRET="$MODPATH/.tg-secret.install.bak"
 PRESERVED_PROFILE=""
 
 # Preserve the selected profile across module upgrades/reinstalls.
@@ -45,6 +49,25 @@ preserve_user_list() {
         cat "$_list_candidate" > "$PRESERVED_USER_LIST_FILE" || abort "! Failed to preserve user list"
         return
     done
+}
+
+# Preserve the Telegram proxy config and secret across updates (best-effort).
+preserve_tgproxy_state() {
+    rm -f "$PRESERVED_TGPROXY_CONF" "$PRESERVED_TG_SECRET"
+    for _tc in "$TGPROXY_CONF_FILE" "$LIVE_MODULE_DIR/tgproxy.conf" "$UPDATE_MODULE_DIR/tgproxy.conf"; do
+        [ -f "$_tc" ] || continue
+        cat "$_tc" > "$PRESERVED_TGPROXY_CONF" 2>/dev/null && break
+    done
+    for _ts in "$TG_SECRET_FILE" "$LIVE_MODULE_DIR/.tg_secret" "$UPDATE_MODULE_DIR/.tg_secret"; do
+        [ -f "$_ts" ] || continue
+        cat "$_ts" > "$PRESERVED_TG_SECRET" 2>/dev/null && break
+    done
+}
+
+restore_tgproxy_state() {
+    [ -f "$PRESERVED_TGPROXY_CONF" ] && cat "$PRESERVED_TGPROXY_CONF" > "$TGPROXY_CONF_FILE" 2>/dev/null
+    [ -f "$PRESERVED_TG_SECRET" ] && cat "$PRESERVED_TG_SECRET" > "$TG_SECRET_FILE" 2>/dev/null
+    rm -f "$PRESERVED_TGPROXY_CONF" "$PRESERVED_TG_SECRET"
 }
 
 normalize_network_mode() {
@@ -100,12 +123,15 @@ restore_active_profile() {
     fi
 }
 
-# Keep only the selected architecture binary under the canonical runtime name.
+# Keep only the selected architecture binaries under their canonical runtime names.
 select_arch_binary() {
     if [ -f "$BIN_DIR/nfqws2-$ARCH" ]; then
         mv "$BIN_DIR/nfqws2-$ARCH" "$BIN_DIR/nfqws2"
     else
         abort "! Unsupported architecture: $ARCH"
+    fi
+    if [ -f "$BIN_DIR/nztg-$ARCH" ]; then
+        mv "$BIN_DIR/nztg-$ARCH" "$BIN_DIR/nztg"
     fi
 }
 
@@ -113,7 +139,9 @@ select_arch_binary() {
 cleanup_unused_binaries() {
     for _bin_file in "$BIN_DIR"/*; do
         [ -e "$_bin_file" ] || continue
-        [ "$_bin_file" = "$BIN_DIR/nfqws2" ] && continue
+        case "$_bin_file" in
+            "$BIN_DIR/nfqws2"|"$BIN_DIR/nztg") continue ;;
+        esac
         rm -f "$_bin_file"
     done
 }
@@ -131,6 +159,7 @@ configure_permissions() {
 read_preserved_profile
 preserve_user_list
 preserve_network_mode
+preserve_tgproxy_state
 
 ui_print "- Preparing module files..."
 unzip -oq "$ZIPFILE" -x 'META-INF/*' -d "$MODPATH" || abort "! Failed to extract module files"
@@ -139,6 +168,7 @@ unzip -oq "$ZIPFILE" -x 'META-INF/*' -d "$MODPATH" || abort "! Failed to extract
 prepare_directories
 restore_user_list
 restore_network_mode
+restore_tgproxy_state
 restore_active_profile
 select_arch_binary
 cleanup_unused_binaries

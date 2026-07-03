@@ -6,3 +6,8 @@ Thumbs.db
 nzapret.log
 nzapret.log.prev
 nzapret-events.log
+nztg.log
+nztg.log.prev
+tgproxy.conf
+.tg_secret
+.tg_link

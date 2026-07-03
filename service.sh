@@ -18,6 +18,12 @@ LUA_DIR="$MODDIR/lua"
 PAYLOAD_QUIC_FILE="$PAYLOADS/quic_initial_www_google_com.bin"
 PAYLOAD_TLS_FILE="$PAYLOADS/tls_clienthello_www_google_com.bin"
 BIN="$MODDIR/bin/nfqws2"
+NZTG_BIN="$MODDIR/bin/nztg"
+TGPROXY_CONF="$MODDIR/tgproxy.conf"
+TG_SECRET_FILE="$MODDIR/.tg_secret"
+TG_LINK_FILE="$MODDIR/.tg_link"
+TG_LOGFILE="$MODDIR/nztg.log"
+TG_PROCESS_NAME="nztg"
 PROFILE_DIR="$MODDIR/profiles"
 ACTIVE_PROFILE_FILE="$PROFILE_DIR/profile.current"
 NETWORK_MODE_FILE="$PROFILE_DIR/network.mode"
@@ -249,6 +255,32 @@ start_nfqws2_from_profile() {
     echo $!
 }
 
+# Start the Telegram MTProto proxy (nztgproxy) alongside nfqws2.
+# Non-fatal: DPI bypass must come up even if the Telegram proxy fails.
+start_tgproxy() {
+    [ -f "$NZTG_BIN" ] || {
+        log_event TGPROXY "binary missing, skipping Telegram proxy"
+        return 0
+    }
+    chmod +x "$NZTG_BIN" 2>/dev/null
+    ensure_tgproxy_conf
+
+    killall "$TG_PROCESS_NAME" 2>/dev/null
+    [ -f "$TG_LOGFILE" ] && mv -f "$TG_LOGFILE" "$TG_LOGFILE.prev" 2>/dev/null
+    : > "$TG_LOGFILE" 2>/dev/null
+
+    # tg_build_args emits space-free, CLI-validated tokens; word-splitting is intended.
+    # shellcheck disable=SC2046
+    "$NZTG_BIN" $(tg_build_args) --secret-file "$TG_SECRET_FILE" --link-file "$TG_LINK_FILE" >> "$TG_LOGFILE" 2>&1 &
+    _tgpid=$!
+    sleep 1
+    if kill -0 "$_tgpid" 2>/dev/null; then
+        log_event TGPROXY "started (pid: $_tgpid)"
+    else
+        log_event ERROR "nztgproxy failed to start, see $TG_LOGFILE"
+    fi
+}
+
 # Firewall: NFQUEUE rules with multiport limit handling
 add_nfqueue_rule() {
     _tbl="$1"
@@ -422,3 +454,6 @@ NFQWS2_PID=$(start_nfqws2_from_profile)
 sleep 1
 kill -0 "$NFQWS2_PID" 2>/dev/null || fail "nfqws2 exited immediately, see $LOGFILE"
 log_event NFQWS2 "started (pid: $NFQWS2_PID)"
+
+# Start the Telegram MTProto proxy alongside the DPI engine.
+start_tgproxy

@@ -131,3 +131,53 @@ is_valid_private_dns_hostname() {
     done
     return 0
 }
+
+# --- Telegram proxy (nztgproxy) ---
+# Callers must define TGPROXY_CONF before using these helpers.
+DEFAULT_TG_HOST="127.0.0.1"
+DEFAULT_TG_PORT="1443"
+DEFAULT_TG_DC_A="2:149.154.167.220"
+DEFAULT_TG_DC_B="4:149.154.167.220"
+
+# Write the original defaults if no config exists yet.
+ensure_tgproxy_conf() {
+    [ -f "$TGPROXY_CONF" ] && return 0
+    {
+        printf 'host=%s\n' "$DEFAULT_TG_HOST"
+        printf 'port=%s\n' "$DEFAULT_TG_PORT"
+        printf 'cf_enabled=1\n'
+        printf 'cf_domain=\n'
+        printf 'dc=%s\n' "$DEFAULT_TG_DC_A"
+        printf 'dc=%s\n' "$DEFAULT_TG_DC_B"
+    } > "$TGPROXY_CONF" 2>/dev/null
+}
+
+# get_tg_conf <key> [default] — first value for a single-value key.
+get_tg_conf() {
+    _tk="$1"; _tdef="$2"
+    [ -f "$TGPROXY_CONF" ] || { printf '%s' "$_tdef"; return; }
+    _tv=$(grep -m1 "^$_tk=" "$TGPROXY_CONF" 2>/dev/null | sed "s/^$_tk=//" | tr -d '\r')
+    [ -n "$_tv" ] || _tv="$_tdef"
+    printf '%s' "$_tv"
+}
+
+# Emit the `dc=` rules (one per line, without the prefix).
+get_tg_dc_lines() {
+    [ -f "$TGPROXY_CONF" ] || return 0
+    grep '^dc=' "$TGPROXY_CONF" 2>/dev/null | sed 's/^dc=//' | tr -d '\r'
+}
+
+# Build the nztg argument string from the config (used unquoted for word-split;
+# all values are space-free and validated by the CLI before being written).
+tg_build_args() {
+    printf ' --host %s --port %s' \
+        "$(get_tg_conf host "$DEFAULT_TG_HOST")" \
+        "$(get_tg_conf port "$DEFAULT_TG_PORT")"
+    get_tg_dc_lines | while IFS= read -r _tdc; do
+        [ -n "$_tdc" ] && printf ' --dc-ip %s' "$_tdc"
+    done
+    [ "$(get_tg_conf cf_enabled 1)" = "0" ] && printf ' --no-cfproxy'
+    for _tcfd in $(get_tg_conf cf_domain ""); do
+        [ -n "$_tcfd" ] && printf ' --cfproxy-domain %s' "$_tcfd"
+    done
+}
