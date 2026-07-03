@@ -8,15 +8,15 @@
 ![Root](https://img.shields.io/badge/Root-Magisk%20%7C%20KernelSU-1f6feb?style=for-the-badge)
 ![Engine](https://img.shields.io/badge/Engine-nfqws2-f59e0b?style=for-the-badge)
 ![UI](https://img.shields.io/badge/UI-KernelSU%20WebUI-8b5cf6?style=for-the-badge)
-![Version](https://img.shields.io/badge/Version-v2.2.1-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-v3.0.0-blue?style=for-the-badge)
 
 </div>
 
 ---
 
-**nzapret** — автономный и легковесный модуль для Android-устройств с root-доступом. Модуль работает **на базе [zapret2](https://github.com/bol-van/zapret2)**, используя локальный движок `nfqws2` и правила `iptables`/`ip6tables` для перехвата DPI.
+**nzapret** — автономный и легковесный модуль для Android-устройств с root-доступом. Модуль работает **на базе [zapret2](https://github.com/bol-van/zapret2)**, используя локальный движок `nfqws2` и правила `iptables`/`ip6tables` для обхода DPI, а также встроенный прокси `nztg` для разблокировки Telegram.
 
-Бинарники, пейлоады и списки маршрутизации взяты из оригинального апстрима, но весь код обвязки написан с нуля под Android — с удобным Web-интерфейсом и без лишнего мусора в системе.
+Бинарники `nfqws2`, пейлоады и списки маршрутизации взяты из оригинального апстрима, прокси-сервер `nztg` собран на базе собственной Go-реализации, а весь код обвязки написан с нуля под Android — с удобным Web-интерфейсом и без лишнего мусора в системе.
 
 ---
 
