@@ -1648,3 +1648,87 @@ body.ui-busy .icon-btn {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
 }
+
+/* ---- Telegram card ---- */
+.tg-section-title {
+    margin: 18px 0 10px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.tg-section-title:first-of-type {
+    margin-top: 4px;
+}
+.tg-grid {
+    display: flex;
+    gap: 10px;
+}
+.tg-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+    flex: 1;
+    min-width: 0;
+}
+.tg-field-port {
+    flex: 0 0 96px;
+}
+.tg-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.tg-secret-row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+}
+.tg-secret-row .user-list-input {
+    flex: 1;
+    min-width: 0;
+}
+.tg-icon-square {
+    flex: 0 0 46px;
+    width: 46px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+.tg-link-actions {
+    display: flex;
+    gap: 8px;
+    margin: 4px 0 6px;
+}
+.tg-textarea {
+    resize: vertical;
+    min-height: 76px;
+    line-height: 1.5;
+}
+.tg-tooltip {
+    white-space: pre-line;
+}
+.tg-check {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--text-primary);
+    margin: 8px 0;
+    cursor: pointer;
+}
+.tg-check input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent);
+    flex: 0 0 auto;
+}
+.tg-cf-domain-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.tg-cf-domain-row .user-list-input:disabled {
+    opacity: 0.5;
+}

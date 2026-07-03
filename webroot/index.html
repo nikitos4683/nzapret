@@ -59,6 +59,10 @@
                         <span class="status-item-value" id="privateDnsLabel">--</span>
                     </div>
                     <div class="status-item">
+                        <span class="status-item-label" data-i18n="status.labels.telegram">Telegram</span>
+                        <span class="status-item-value" id="tgStatusValue">--</span>
+                    </div>
+                    <div class="status-item">
                         <span class="status-item-label" data-i18n="status.labels.domains">Домены</span>
                         <span class="status-item-value" id="domainCount">0</span>
                     </div>
@@ -114,6 +118,68 @@
         </div>
 
         <div class="page" id="pageTools">
+            <div class="card" id="tgCard">
+                <div class="panel-head">
+                    <div>
+                        <div class="panel-title" data-i18n="tg.title">Telegram</div>
+                        <div class="panel-subtitle" data-i18n="tg.subtitle">Локальный MTProto-прокси для обхода блокировки Telegram. Подключите клиент по ссылке ниже.</div>
+                    </div>
+                    <div class="panel-actions">
+                        <button class="icon-btn primary" id="btnTgOpen" type="button" onclick="openInTelegram()" data-i18n="tg.open">Открыть в Telegram</button>
+                    </div>
+                </div>
+
+                <div class="tg-section-title" data-i18n="tg.mtproto_title">Подключение MTProto</div>
+                <div class="tg-grid">
+                    <div class="tg-field">
+                        <label class="tg-label" data-i18n="tg.host">IP-адрес</label>
+                        <input class="user-list-input" id="tgHost" type="text" inputmode="url" autocapitalize="off" autocomplete="off" spellcheck="false">
+                    </div>
+                    <div class="tg-field tg-field-port">
+                        <label class="tg-label" data-i18n="tg.port">Порт</label>
+                        <input class="user-list-input" id="tgPort" type="text" inputmode="numeric" autocomplete="off" spellcheck="false">
+                    </div>
+                </div>
+                <div class="tg-field">
+                    <label class="tg-label" data-i18n="tg.secret">Secret</label>
+                    <div class="tg-secret-row">
+                        <input class="user-list-input" id="tgSecret" type="text" readonly autocomplete="off" spellcheck="false">
+                        <button class="icon-btn tg-icon-square" id="btnTgRegen" type="button" onclick="regenerateTgSecret()" data-i18n-title="tg.regen">
+                            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="tg-link-actions">
+                    <button class="icon-btn" id="btnTgCopy" type="button" onclick="copyTgLink()" data-i18n="tg.copy_link">Копировать ссылку</button>
+                </div>
+
+                <div class="tg-section-title" data-i18n="tg.dc_title">Датацентры Telegram (DC → IP)</div>
+                <div class="panel-subtitle" data-i18n="tg.dc_hint">По одному правилу на строку, формат: номер:IP</div>
+                <textarea class="user-list-input tg-textarea" id="tgDc" rows="3" autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
+                <div class="tools-support-line tg-tooltip" data-i18n="tg.dc_tooltip">Соответствие номера датацентра Telegram (DC) и IP-адреса сервера.</div>
+
+                <div class="tg-section-title" data-i18n="tg.cf_title">Cloudflare Proxy</div>
+                <label class="tg-check">
+                    <input type="checkbox" id="tgCfEnabled">
+                    <span data-i18n="tg.cf_enable">Включить CF-прокси</span>
+                </label>
+                <div class="tg-cf-domain-row">
+                    <label class="tg-check">
+                        <input type="checkbox" id="tgCfDomainEnabled">
+                        <span data-i18n="tg.cf_custom">Свой домен</span>
+                    </label>
+                    <input class="user-list-input" id="tgCfDomain" type="text" inputmode="url" autocapitalize="off" autocomplete="off" spellcheck="false" data-i18n-placeholder="tg.cf_custom_placeholder" placeholder="example.com">
+                </div>
+                <div class="tg-link-actions">
+                    <button class="icon-btn" id="btnTgCfTest" type="button" onclick="testCfProxy()" data-i18n="tg.cf_test">Тест CF-прокси</button>
+                </div>
+
+                <div class="user-list-footer">
+                    <span class="user-list-footnote" id="tgDirtyNote" data-i18n="tg.dirty_none">Несохранённых изменений нет.</span>
+                    <button class="icon-btn primary user-list-save-btn" id="btnSaveTg" type="button" onclick="saveTgSettings()" data-i18n="common.save">Сохранить</button>
+                </div>
+            </div>
+
             <div class="card" id="userListCard">
                 <div class="panel-head">
                     <div>

@@ -83,6 +83,10 @@ let userListSnapshot = '';
 let diagnosticsData = null;
 let diagnosticsExpanded = false;
 let privateDnsInputDirty = false;
+let tgConfig = null;
+let tgLoaded = false;
+let tgRequestInFlight = false;
+let tgSnapshot = null;
 let toastTimer = null;
 let toastState = null;
 let uiLockState = {
@@ -311,6 +315,7 @@ function renderStatusCard() {
         document.getElementById('pidBadge').textContent = 'PID --';
         document.getElementById('networkModeLabel').textContent = '--';
         document.getElementById('privateDnsLabel').textContent = '--';
+        document.getElementById('tgStatusValue').textContent = '--';
         document.getElementById('rulesV4').textContent = '?';
         document.getElementById('rulesV6').textContent = '?';
         document.getElementById('domainCount').textContent = '?';
@@ -332,6 +337,7 @@ function renderStatusCard() {
     document.getElementById('pidBadge').textContent = pidCount > 1 ? `PID ${pid} +${pidCount - 1}` : `PID ${pid}`;
     document.getElementById('networkModeLabel').textContent = getNetworkModeDisplayLabel(status);
     document.getElementById('privateDnsLabel').textContent = getPrivateDnsDisplayLabel(status);
+    document.getElementById('tgStatusValue').textContent = status.tg_active ? t('status.on') : t('status.off');
     document.getElementById('rulesV4').textContent = status.rules_v4 ?? 0;
     document.getElementById('rulesV6').textContent = status.rules_v6 ?? 0;
     document.getElementById('domainCount').textContent = formatNumber(status.domain_count ?? 0);
@@ -953,6 +959,7 @@ function rerenderLogsUi() {
 
 async function refreshToolsPageData(force = false) {
     await loadUserList(force);
+    await loadTgConfig(force);
 }
 
 function syncLogPolling() {
@@ -1049,6 +1056,7 @@ function renderToolsPageUi(status = currentStatus) {
     renderNetworkModeControls(status);
     renderPrivateDnsControls(status);
     updateUserListEditorState();
+    renderTgCard();
     rerenderDiagnoseButton();
     renderDiagnosticsPanel();
 }
@@ -1497,6 +1505,265 @@ async function clearEventsLog() {
     }
 }
 
+// ---- Telegram proxy (nztgproxy) ----
+function tgInputs() {
+    return {
+        host: document.getElementById('tgHost'),
+        port: document.getElementById('tgPort'),
+        secret: document.getElementById('tgSecret'),
+        dc: document.getElementById('tgDc'),
+        cfEnabled: document.getElementById('tgCfEnabled'),
+        cfDomainEnabled: document.getElementById('tgCfDomainEnabled'),
+        cfDomain: document.getElementById('tgCfDomain')
+    };
+}
+
+function parseDcLines(text) {
+    return String(text || '')
+        .replace(/\r/g, '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith('#'));
+}
+
+function getTgDraft() {
+    const el = tgInputs();
+    if (!el.host) return null;
+    return {
+        host: el.host.value.trim(),
+        port: el.port.value.trim(),
+        dc: parseDcLines(el.dc.value),
+        cfEnabled: el.cfEnabled.checked,
+        cfDomain: el.cfDomainEnabled.checked ? el.cfDomain.value.trim() : ''
+    };
+}
+
+function isTgDirty() {
+    if (tgSnapshot === null) return false;
+    const draft = getTgDraft();
+    return draft !== null && JSON.stringify(draft) !== tgSnapshot;
+}
+
+function updateTgDirtyNote() {
+    const el = tgInputs();
+    if (el.cfDomain && el.cfDomainEnabled) {
+        el.cfDomain.disabled = !el.cfDomainEnabled.checked;
+    }
+    const note = document.getElementById('tgDirtyNote');
+    const btn = document.getElementById('btnSaveTg');
+    const dirty = isTgDirty();
+    if (note) note.textContent = dirty ? t('tg.dirty_pending') : t('tg.dirty_none');
+    if (btn) btn.classList.toggle('disabled', !dirty || isLoading);
+}
+
+function renderTgCard() {
+    const el = tgInputs();
+    if (!el.host || !tgConfig) return;
+
+    // Preserve fields the user is editing; only repopulate when in sync.
+    if (tgSnapshot === null || !isTgDirty()) {
+        el.host.value = tgConfig.host || '';
+        el.port.value = tgConfig.port || '';
+        el.secret.value = tgConfig.secret || '';
+        el.dc.value = (tgConfig.dc_redirects || []).join('\n');
+        el.cfEnabled.checked = tgConfig.cf_enabled !== false;
+        const dom = tgConfig.cf_domain || '';
+        el.cfDomainEnabled.checked = Boolean(dom);
+        el.cfDomain.value = dom;
+        tgSnapshot = JSON.stringify(getTgDraft());
+    }
+    updateTgDirtyNote();
+}
+
+async function loadTgConfig(force = false) {
+    if (tgRequestInFlight) return;
+    if (tgLoaded && !force) {
+        renderTgCard();
+        return;
+    }
+    tgRequestInFlight = true;
+    try {
+        const res = await exec(`${CLI} tg status --json`);
+        const payload = matchJson(res);
+        if (!payload) return;
+        tgConfig = JSON.parse(payload);
+        tgLoaded = true;
+        renderTgCard();
+    } catch (error) {
+        console.error('Telegram config load error:', error);
+    } finally {
+        tgRequestInFlight = false;
+    }
+}
+
+async function saveTgSettings() {
+    if (isLoading || !tgConfig || !isTgDirty()) return;
+
+    const draft = getTgDraft();
+    if (!draft) return;
+
+    if (!draft.host) {
+        showToast('tg.invalid_host');
+        return;
+    }
+    if (!/^\d+$/.test(draft.port) || Number(draft.port) < 1 || Number(draft.port) > 65535) {
+        showToast('tg.invalid_port');
+        return;
+    }
+    for (const line of draft.dc) {
+        if (!/^\d+:\d{1,3}(\.\d{1,3}){3}$/.test(line)) {
+            showToast('tg.invalid_dc', { line });
+            return;
+        }
+    }
+    if (draft.cfDomain && !isValidPrivateDnsHostname(draft.cfDomain)) {
+        showToast('tg.invalid_domain');
+        return;
+    }
+
+    const prev = tgConfig;
+    const cmds = [];
+    if (draft.host !== prev.host) cmds.push(`tg set host ${shellQuote(draft.host)}`);
+    if (draft.port !== String(prev.port)) cmds.push(`tg set port ${shellQuote(draft.port)}`);
+    if (draft.dc.join('\n') !== (prev.dc_redirects || []).join('\n')) {
+        cmds.push(`tg set dc ${shellQuote(draft.dc.join('\n'))}`);
+    }
+    if (draft.cfEnabled !== (prev.cf_enabled !== false)) {
+        cmds.push(`tg set cf ${draft.cfEnabled ? 'on' : 'off'}`);
+    }
+    if (draft.cfDomain !== (prev.cf_domain || '')) {
+        cmds.push(`tg set cf-domain ${shellQuote(draft.cfDomain)}`);
+    }
+
+    if (!cmds.length) {
+        tgSnapshot = JSON.stringify(draft);
+        updateTgDirtyNote();
+        return;
+    }
+
+    const shouldRestart = Boolean(currentStatus && currentStatus.active);
+    isLoading = true;
+    setUiLocked(true, shouldRestart ? 'tg.saving_restart' : 'tg.saving');
+    await waitForPaint();
+
+    try {
+        for (const cmd of cmds) {
+            const res = await exec(`${CLI} ${cmd}`);
+            if (res.errno !== 0) throw new Error(combineOutput(res) || cmd);
+        }
+        if (shouldRestart) {
+            const res = await exec(`${CLI} restart`);
+            if (res.errno !== 0) throw new Error(combineOutput(res) || 'restart failed');
+        }
+        tgSnapshot = null;
+        await loadTgConfig(true);
+        await Promise.all([refreshStatus(true), refreshActiveLogView()]);
+        showToast(shouldRestart ? 'tg.saved_restart' : 'tg.saved');
+    } catch (error) {
+        showToast('generic.error_with_message', { message: error.message });
+    } finally {
+        isLoading = false;
+        setUiLocked(false);
+        renderRuntimePageUi();
+        renderToolsPageUi();
+    }
+}
+
+async function regenerateTgSecret() {
+    if (isLoading) return;
+    const shouldRestart = Boolean(currentStatus && currentStatus.active);
+
+    const res = await runCli('tg regen-secret', {
+        loadingKey: 'tg.regenerating',
+        refresh: false
+    });
+    if (!res.ok) return;
+
+    if (shouldRestart) {
+        const rr = await runCli('restart', { loadingKey: 'tg.saving_restart', refresh: false });
+        if (!rr.ok) return;
+    }
+    tgSnapshot = null;
+    await loadTgConfig(true);
+    await refreshStatus(true);
+    showToast('tg.secret_regenerated');
+}
+
+async function testCfProxy() {
+    if (isLoading) return;
+    const btn = document.getElementById('btnTgCfTest');
+    if (btn) btn.classList.add('loading');
+    try {
+        setUiLocked(true, 'tg.cf_testing');
+        await waitForPaint();
+        const res = await exec(`${CLI} tg cf-test --json`);
+        const payload = matchJson(res);
+        if (payload) {
+            const result = JSON.parse(payload);
+            if (result.ok) {
+                showToast('tg.cf_test_ok', { domain: result.domain });
+            } else {
+                showToast('tg.cf_test_fail', { error: result.error || '' });
+            }
+        } else {
+            showToast('tg.cf_test_fail', { error: combineOutput(res) });
+        }
+    } catch (error) {
+        showToast('tg.cf_test_fail', { error: error.message });
+    } finally {
+        if (btn) btn.classList.remove('loading');
+        setUiLocked(false);
+    }
+}
+
+async function openInTelegram() {
+    if (isLoading) return;
+    await runCli('tg open', {
+        loadingKey: 'tg.opening',
+        successKey: 'tg.opened',
+        refresh: false
+    });
+}
+
+async function copyTgLink() {
+    if (!tgConfig || !tgConfig.link) {
+        showToast('tg.copy_failed');
+        return;
+    }
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(tgConfig.link);
+        } else {
+            const ta = document.createElement('textarea');
+            ta.value = tgConfig.link;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+        }
+        showToast('tg.copied');
+    } catch (error) {
+        showToast('tg.copy_failed');
+    }
+}
+
+function setupTgCard() {
+    ['tgHost', 'tgPort', 'tgDc', 'tgCfDomain'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el && el.dataset.bound !== '1') {
+            el.dataset.bound = '1';
+            el.addEventListener('input', updateTgDirtyNote);
+        }
+    });
+    ['tgCfEnabled', 'tgCfDomainEnabled'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el && el.dataset.bound !== '1') {
+            el.dataset.bound = '1';
+            el.addEventListener('change', updateTgDirtyNote);
+        }
+    });
+}
+
 function changeLocale(locale) {
     setI18nLocale(locale);
     rerenderAppUi();
@@ -1530,6 +1797,11 @@ window.applyPrivateDnsHostname = applyPrivateDnsHostname;
 window.reloadUserList = reloadUserList;
 window.addUserListDomain = addUserListDomain;
 window.saveUserList = saveUserList;
+window.saveTgSettings = saveTgSettings;
+window.regenerateTgSecret = regenerateTgSecret;
+window.testCfProxy = testCfProxy;
+window.openInTelegram = openInTelegram;
+window.copyTgLink = copyTgLink;
 window.setLogView = setLogView;
 window.clearEventsLog = clearEventsLog;
 window.runDiagnose = runDiagnose;
@@ -1541,6 +1813,7 @@ setupLocaleControls();
 setupScrollTracking();
 setupUserListEditor();
 setupPrivateDnsControls();
+setupTgCard();
 rerenderAppUi();
 renderPages();
 refreshStatus();
