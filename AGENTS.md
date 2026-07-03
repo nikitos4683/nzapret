@@ -135,6 +135,7 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
     - `private_dns_label`
     - `private_dns_default_hostname`
     - `tg_active`
+    - `tg_pid`
   - `nzapret tg status --json` returns the Telegram proxy config/state (`host`, `port`, `secret`, `link`, `dc_redirects[]`, `cf_enabled`, `cf_domain`, `active`, `pid`) and is consumed by the WebUI Telegram card.
   - `nzapret diagnose --json` and `nzapret events --json` are also consumed by the UI.
   - If JSON schemas or command names change, update the WebUI in the same change.

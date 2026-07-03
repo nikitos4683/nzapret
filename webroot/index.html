@@ -118,6 +118,37 @@
         </div>
 
         <div class="page" id="pageTools">
+            <div class="card" id="userListCard">
+                <div class="panel-head">
+                    <div>
+                        <div class="panel-title" data-i18n="user_list.title">Персональный список доменов</div>
+                        <div class="panel-subtitle" data-i18n="user_list.subtitle">Добавляйте или удаляйте домены, затем нажимайте Сохранить. Кнопка Обновить заново читает сохранённый список с устройства, а nfqws2 подхватывает изменения hostlist без перезапуска.</div>
+                    </div>
+                    <div class="panel-actions">
+                        <button class="icon-btn" id="btnReloadUserList" type="button" onclick="reloadUserList()" data-i18n="common.reload">Обновить</button>
+                    </div>
+                </div>
+
+                <div class="user-list-meta">
+                    <span class="user-list-badge" id="userListCountBadge">0 доменов</span>
+                    <span class="user-list-note" id="userListBindingNote" data-i18n="user_list.binding_applied">Используется текущей конфигурацией.</span>
+                </div>
+
+                <div class="user-list-pane empty" id="userListPane">
+                    <div class="user-list-empty" data-i18n="user_list.empty">Персональный список пока пуст. Добавьте домен ниже, чтобы включить его в активный hostlist.</div>
+                </div>
+
+                <div class="user-list-quick-add">
+                    <input class="user-list-input" id="userListQuickInput" type="text" inputmode="url" autocapitalize="off" autocomplete="off" spellcheck="false" data-i18n-placeholder="user_list.quick_placeholder" placeholder="Введите домен и нажмите Добавить">
+                    <button class="icon-btn" id="btnAddUserListDomain" type="button" onclick="addUserListDomain()" data-i18n="common.add">Добавить</button>
+                </div>
+
+                <div class="user-list-footer">
+                    <span class="user-list-footnote" id="userListDirtyNote" data-i18n="user_list.dirty_none">Несохранённых изменений нет.</span>
+                    <button class="icon-btn primary user-list-save-btn" id="btnSaveUserList" type="button" onclick="saveUserList()" data-i18n="common.save">Сохранить</button>
+                </div>
+            </div>
+
             <div class="card" id="tgCard">
                 <div class="panel-head">
                     <div>
@@ -177,37 +208,6 @@
                 <div class="user-list-footer">
                     <span class="user-list-footnote" id="tgDirtyNote" data-i18n="tg.dirty_none">Несохранённых изменений нет.</span>
                     <button class="icon-btn primary user-list-save-btn" id="btnSaveTg" type="button" onclick="saveTgSettings()" data-i18n="common.save">Сохранить</button>
-                </div>
-            </div>
-
-            <div class="card" id="userListCard">
-                <div class="panel-head">
-                    <div>
-                        <div class="panel-title" data-i18n="user_list.title">Персональный список доменов</div>
-                        <div class="panel-subtitle" data-i18n="user_list.subtitle">Добавляйте или удаляйте домены, затем нажимайте Сохранить. Кнопка Обновить заново читает сохранённый список с устройства, а nfqws2 подхватывает изменения hostlist без перезапуска.</div>
-                    </div>
-                    <div class="panel-actions">
-                        <button class="icon-btn" id="btnReloadUserList" type="button" onclick="reloadUserList()" data-i18n="common.reload">Обновить</button>
-                    </div>
-                </div>
-
-                <div class="user-list-meta">
-                    <span class="user-list-badge" id="userListCountBadge">0 доменов</span>
-                    <span class="user-list-note" id="userListBindingNote" data-i18n="user_list.binding_applied">Используется текущей конфигурацией.</span>
-                </div>
-
-                <div class="user-list-pane empty" id="userListPane">
-                    <div class="user-list-empty" data-i18n="user_list.empty">Персональный список пока пуст. Добавьте домен ниже, чтобы включить его в активный hostlist.</div>
-                </div>
-
-                <div class="user-list-quick-add">
-                    <input class="user-list-input" id="userListQuickInput" type="text" inputmode="url" autocapitalize="off" autocomplete="off" spellcheck="false" data-i18n-placeholder="user_list.quick_placeholder" placeholder="Введите домен и нажмите Добавить">
-                    <button class="icon-btn" id="btnAddUserListDomain" type="button" onclick="addUserListDomain()" data-i18n="common.add">Добавить</button>
-                </div>
-
-                <div class="user-list-footer">
-                    <span class="user-list-footnote" id="userListDirtyNote" data-i18n="user_list.dirty_none">Несохранённых изменений нет.</span>
-                    <button class="icon-btn primary user-list-save-btn" id="btnSaveUserList" type="button" onclick="saveUserList()" data-i18n="common.save">Сохранить</button>
                 </div>
             </div>
 
