@@ -44,11 +44,24 @@ const LOG_VIEWS = {
         paneId: 'runtimeLogPane',
         tabId: 'btnRuntimeTab'
     },
+    nztg: {
+        paneId: 'nztgLogPane',
+        tabId: 'btnNztgTab'
+    },
     events: {
         paneId: 'eventsPane',
         tabId: 'btnEventsTab'
     }
 };
+// Text-based log views (as opposed to the structured events view) and the file
+// each one tails.
+const TEXT_LOG_FILES = {
+    runtime: 'nzapret.log',
+    nztg: 'nztg.log'
+};
+function isTextLog(view) {
+    return Object.prototype.hasOwnProperty.call(TEXT_LOG_FILES, view);
+}
 
 initializeLocale();
 
@@ -61,6 +74,11 @@ let logRequestInFlight = false;
 let eventsRequestInFlight = false;
 const logState = {
     runtime: {
+        text: '',
+        loaded: false,
+        scrolledUp: false
+    },
+    nztg: {
         text: '',
         loaded: false,
         scrolledUp: false
@@ -601,29 +619,31 @@ function updateLogMeta() {
     if (activeLogView === 'events') {
         const count = getLogViewState('events').items.length;
         meta.textContent = count ? tc('counts.events', count) : t('logs.event_history');
+    } else if (activeLogView === 'nztg') {
+        meta.textContent = t('logs.nztg_meta');
     } else {
         meta.textContent = t('logs.runtime_meta');
     }
 }
 
 function updateStatusBar() {
-    const isLive = activeLogView === 'runtime' && logInterval !== null;
+    const isLive = isTextLog(activeLogView) && logInterval !== null;
     const clearButton = document.getElementById('btnClearEvents');
     const jumpButton = document.getElementById('logJumpBtn');
     document.getElementById('logLiveDot').hidden = !isLive;
     document.getElementById('logLiveLabel').hidden = !isLive;
     document.getElementById('logLiveSep').hidden = !isLive;
 
-    if (activeLogView === 'runtime') {
-        const runtimeState = getLogViewState('runtime');
-        if (runtimeState.loaded) {
-            const lines = runtimeState.text ? runtimeState.text.split('\n').length : 0;
+    if (isTextLog(activeLogView)) {
+        const state = getLogViewState(activeLogView);
+        if (state.loaded) {
+            const lines = state.text ? state.text.split('\n').length : 0;
             document.getElementById('logLineCount').textContent = tc('counts.lines', lines);
         } else {
             document.getElementById('logLineCount').textContent = '--';
         }
         clearButton.hidden = true;
-        jumpButton.classList.toggle('visible', isLogViewScrolledUp('runtime'));
+        jumpButton.classList.toggle('visible', isLogViewScrolledUp(activeLogView));
     } else {
         document.getElementById('logLineCount').textContent = tc('counts.entries', getLogViewState('events').items.length);
         clearButton.hidden = false;
@@ -875,34 +895,34 @@ async function refreshEvents() {
     }
 }
 
-function renderRuntimeLog(options = {}) {
+function renderTextLog(view, options = {}) {
     const { forceBottom = false } = options;
-    const pane = getLogPane('runtime');
+    const pane = getLogPane(view);
     const previousScrollTop = pane.scrollTop;
-    const runtimeState = getLogViewState('runtime');
-    const nextText = !runtimeState.loaded
+    const state = getLogViewState(view);
+    const nextText = !state.loaded
         ? t('logs.loading_runtime')
-        : (runtimeState.text || t('logs.runtime_empty'));
+        : (state.text || t('logs.runtime_empty'));
     const changed = updatePaneContent(pane, nextText);
 
     if (!changed && !forceBottom) {
         return;
     }
 
-    syncLogPaneScroll('runtime', pane, previousScrollTop, { forceBottom });
+    syncLogPaneScroll(view, pane, previousScrollTop, { forceBottom });
 }
 
-async function refreshLog() {
+async function refreshTextLog(view) {
     if (logRequestInFlight) return;
-    if (activeLogView !== 'runtime') return;
+    if (!isTextLog(view) || activeLogView !== view) return;
 
     logRequestInFlight = true;
     try {
-        const res = await exec(`tail -n 80 ${MODDIR}/nzapret.log 2>/dev/null`);
-        const runtimeState = getLogViewState('runtime');
-        runtimeState.text = String(res.stdout || '').replace(/\r/g, '').trim();
-        runtimeState.loaded = true;
-        renderRuntimeLog();
+        const res = await exec(`tail -n 80 ${MODDIR}/${TEXT_LOG_FILES[view]} 2>/dev/null`);
+        const state = getLogViewState(view);
+        state.text = String(res.stdout || '').replace(/\r/g, '').trim();
+        state.loaded = true;
+        renderTextLog(view);
         updateStatusBar();
     } finally {
         logRequestInFlight = false;
@@ -954,7 +974,8 @@ function renderLogView() {
 }
 
 function rerenderLogsUi() {
-    renderRuntimeLog();
+    renderTextLog('runtime');
+    renderTextLog('nztg');
     renderEventsPane();
     renderLogView();
 }
@@ -965,7 +986,7 @@ async function refreshToolsPageData(force = false) {
 }
 
 function syncLogPolling() {
-    if (activePage === 'logs' && activeLogView === 'runtime' && !document.hidden) {
+    if (activePage === 'logs' && isTextLog(activeLogView) && !document.hidden) {
         startLogPolling();
     } else {
         stopLogPolling();
@@ -981,11 +1002,11 @@ function syncLogPolling() {
 async function refreshActiveLogView() {
     if (activePage !== 'logs') return;
 
-    if (activeLogView === 'runtime') {
-        if (!getLogViewState('runtime').loaded) {
-            renderRuntimeLog({ forceBottom: true });
+    if (isTextLog(activeLogView)) {
+        if (!getLogViewState(activeLogView).loaded) {
+            renderTextLog(activeLogView, { forceBottom: true });
         }
-        await refreshLog();
+        await refreshTextLog(activeLogView);
     } else {
         await refreshEvents();
     }
@@ -1121,7 +1142,7 @@ function startLogPolling() {
     if (logInterval) clearInterval(logInterval);
     logInterval = setInterval(() => {
         if (!document.hidden) {
-            refreshLog();
+            refreshTextLog(activeLogView);
         }
     }, LOG_POLL_MS);
     updateStatusBar();

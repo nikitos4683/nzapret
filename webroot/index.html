@@ -316,6 +316,7 @@
                     <div class="log-tabs">
                         <div class="log-tab-group">
                             <button class="log-tab-btn active" id="btnRuntimeTab" onclick="setLogView('runtime')" data-i18n="logs.runtime_tab">nfqws2</button>
+                            <button class="log-tab-btn" id="btnNztgTab" onclick="setLogView('nztg')" data-i18n="logs.nztg_tab">nztg</button>
                             <button class="log-tab-btn" id="btnEventsTab" onclick="setLogView('events')" data-i18n="logs.events_tab">События</button>
                         </div>
                     </div>
@@ -323,6 +324,7 @@
 
                 <div class="log-panels">
                     <pre class="log-pane active" id="runtimeLogPane">Загрузка runtime-лога...</pre>
+                    <pre class="log-pane" id="nztgLogPane">Загрузка nztg-лога...</pre>
                     <div class="events-pane" id="eventsPane">
                         <div class="events-empty" data-i18n="logs.events_empty">События пока не записаны.</div>
                     </div>

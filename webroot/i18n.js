@@ -225,7 +225,9 @@ const translations = {
         logs: {
             title: 'Логи',
             runtime_meta: 'stdout / stderr nfqws2',
+            nztg_meta: 'stdout / stderr nztg (Telegram)',
             runtime_tab: 'nfqws2',
+            nztg_tab: 'nztg',
             events_tab: 'События',
             loading_runtime: 'Загрузка лога работы...',
             runtime_empty: 'Лог работы пуст.',
@@ -487,7 +489,9 @@ const translations = {
         logs: {
             title: 'Logs',
             runtime_meta: 'nfqws2 stdout / stderr',
+            nztg_meta: 'nztg (Telegram) stdout / stderr',
             runtime_tab: 'nfqws2',
+            nztg_tab: 'nztg',
             events_tab: 'Events',
             loading_runtime: 'Loading runtime log...',
             runtime_empty: 'Runtime log is empty.',
