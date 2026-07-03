@@ -168,9 +168,14 @@ func tryCFFallback(client net.Conn, relayInit []byte, ctx *cryptoCtx, sp *splitt
 	return false
 }
 
-// initCFDomains seeds the balancer with the baked-in defaults, then refreshes
-// from GitHub in the background (best-effort; defaults stay if it fails).
+// initCFDomains seeds the balancer. With user-provided domains it uses those
+// exclusively (no GitHub refresh, matching the reference); otherwise it seeds
+// the baked-in defaults and refreshes from GitHub hourly (best-effort).
 func initCFDomains() {
+	if len(cfg.cfUserDomains) > 0 {
+		balancer.updateDomains(normalizeDomains(cfg.cfUserDomains))
+		return
+	}
 	balancer.updateDomains(decodeDomains(cfEncodedDefaults))
 	go func() {
 		for {

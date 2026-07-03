@@ -23,9 +23,9 @@ const (
 )
 
 const (
-	protoAbridgedInt            uint32 = 0xEFEFEFEF
-	protoIntermediateInt        uint32 = 0xEEEEEEEE
-	protoPaddedIntermediateInt  uint32 = 0xDDDDDDDD
+	protoAbridgedInt           uint32 = 0xEFEFEFEF
+	protoIntermediateInt       uint32 = 0xEEEEEEEE
+	protoPaddedIntermediateInt uint32 = 0xDDDDDDDD
 )
 
 var (

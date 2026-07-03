@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -20,12 +21,14 @@ import (
 )
 
 type config struct {
-	host        string
-	port        int
-	secret      []byte // 16 bytes
-	dcRedirects map[int]string
-	linkFile    string
-	verbose     bool
+	host          string
+	port          int
+	secret        []byte // 16 bytes
+	dcRedirects   map[int]string
+	fallbackCF    bool
+	cfUserDomains []string
+	linkFile      string
+	verbose       bool
 }
 
 var cfg config
@@ -35,8 +38,8 @@ var (
 	verbose bool
 )
 
-func logInfo(format string, a ...interface{})  { logLine("INFO ", format, a...) }
-func logWarn(format string, a ...interface{})  { logLine("WARN ", format, a...) }
+func logInfo(format string, a ...interface{}) { logLine("INFO ", format, a...) }
+func logWarn(format string, a ...interface{}) { logLine("WARN ", format, a...) }
 func logDebug(format string, a ...interface{}) {
 	if verbose {
 		logLine("DEBUG", format, a...)
@@ -50,16 +53,31 @@ func logLine(level, format string, a ...interface{}) {
 }
 
 func main() {
+	// Subcommands used by the module CLI (before flag parsing).
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "gensecret":
+			fmt.Println(hex.EncodeToString(randomSecret()))
+			return
+		case "cftest":
+			runCFTest(os.Args[2:])
+			return
+		}
+	}
+
 	var (
 		host       = flag.String("host", "127.0.0.1", "listen host")
 		port       = flag.Int("port", 1443, "listen port")
 		secretHex  = flag.String("secret", "", "MTProto secret (32 hex chars); random if empty")
 		secretFile = flag.String("secret-file", "", "read/persist the secret at this path")
 		dcIP       arrayFlags
+		cfDomain   arrayFlags
+		noCF       = flag.Bool("no-cfproxy", false, "disable the Cloudflare proxy fallback")
 		linkFile   = flag.String("link-file", "", "write the tg:// proxy link to this path")
 		verboseF   = flag.Bool("verbose", false, "debug logging")
 	)
 	flag.Var(&dcIP, "dc-ip", "target IP for a DC, e.g. 2:149.154.167.220 (repeatable)")
+	flag.Var(&cfDomain, "cfproxy-domain", "custom Cloudflare-proxied domain for WS fallback (repeatable)")
 	flag.Parse()
 
 	log.SetFlags(log.Ltime)
@@ -79,12 +97,14 @@ func main() {
 	}
 
 	cfg = config{
-		host:        *host,
-		port:        *port,
-		secret:      secret,
-		dcRedirects: dcRedirects,
-		linkFile:    *linkFile,
-		verbose:     verbose,
+		host:          *host,
+		port:          *port,
+		secret:        secret,
+		dcRedirects:   dcRedirects,
+		fallbackCF:    !*noCF,
+		cfUserDomains: coerceDomains(cfDomain),
+		linkFile:      *linkFile,
+		verbose:       verbose,
 	}
 
 	link := ddLink(cfg.host, cfg.port, cfg.secret)
@@ -122,7 +142,9 @@ func serve() error {
 	logInfo("  Connect: %s", ddLink(cfg.host, cfg.port, cfg.secret))
 	logInfo("============================================================")
 
-	initCFDomains()
+	if cfg.fallbackCF {
+		initCFDomains()
+	}
 
 	for {
 		conn, err := ln.Accept()
@@ -208,7 +230,7 @@ func handleClient(client net.Conn) {
 		logInfo("[%s] DC%d%s direct WS unavailable -> CF fallback", label, dc, mediaTag)
 	}
 
-	if tryCFFallback(client, relayInit, ctx, sp, dc, label) {
+	if cfg.fallbackCF && tryCFFallback(client, relayInit, ctx, sp, dc, label) {
 		return
 	}
 	if tcpFallback(client, relayInit, ctx, dc, label) {
@@ -321,6 +343,79 @@ func parseDCIPList(list []string) (map[int]string, error) {
 		out[dc] = ipS
 	}
 	return out, nil
+}
+
+// coerceDomains splits comma/space/semicolon-separated values and de-dupes,
+// mirroring the reference coerce_domain_list.
+func coerceDomains(vals []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, v := range vals {
+		for _, part := range strings.FieldsFunc(v, func(r rune) bool {
+			return r == ',' || r == ';' || r == ' '
+		}) {
+			p := strings.TrimSpace(part)
+			if p == "" {
+				continue
+			}
+			if k := strings.ToLower(p); !seen[k] {
+				seen[k] = true
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
+// runCFTest attempts a real WS upgrade to a CF-proxied domain and reports the
+// result. Used by `nzapret tg cf-test` to check the Cloudflare path.
+func runCFTest(args []string) {
+	fs := flag.NewFlagSet("cftest", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "JSON output")
+	domain := fs.String("domain", "", "CF base domain to test (default: built-in pool)")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+
+	var candidates []string
+	if *domain != "" {
+		candidates = coerceDomains([]string{*domain})
+	} else {
+		candidates = decodeDomains(cfEncodedDefaults)
+	}
+
+	ok := false
+	okDomain := ""
+	errStr := "no domains to test"
+	for _, base := range candidates {
+		host := "kws2." + base
+		ws, err := wsConnect(host, host, "", "/apiws", 10*time.Second)
+		if err != nil {
+			errStr = err.Error()
+			continue
+		}
+		ws.close()
+		ok = true
+		okDomain = base
+		errStr = ""
+		break
+	}
+
+	if *jsonOut {
+		b, _ := json.Marshal(struct {
+			OK     bool   `json:"ok"`
+			Domain string `json:"domain"`
+			Error  string `json:"error"`
+		}{ok, okDomain, errStr})
+		fmt.Println(string(b))
+	} else if ok {
+		fmt.Printf("CF proxy OK via %s\n", okDomain)
+	} else {
+		fmt.Printf("CF proxy test failed: %s\n", errStr)
+	}
+	if !ok {
+		os.Exit(1)
+	}
 }
 
 type arrayFlags []string
