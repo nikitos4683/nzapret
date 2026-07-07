@@ -54,10 +54,6 @@
                 </div>
                 <div class="status-grid">
                     <div class="status-item">
-                        <span class="status-item-label" data-i18n="status.labels.network_mode">Сетевой режим</span>
-                        <span class="status-item-value" id="networkModeLabel">--</span>
-                    </div>
-                    <div class="status-item">
                         <span class="status-item-label" data-i18n="status.labels.private_dns">Частный DNS</span>
                         <span class="status-item-value" id="privateDnsLabel">--</span>
                     </div>
@@ -211,33 +207,6 @@
                 <div class="user-list-footer">
                     <span class="user-list-footnote" id="tgDirtyNote" data-i18n="tg.dirty_none">Несохранённых изменений нет.</span>
                     <button class="icon-btn primary user-list-save-btn" id="btnSaveTg" type="button" onclick="saveTgSettings()" data-i18n="common.save">Сохранить</button>
-                </div>
-            </div>
-
-            <div class="card">
-                <div class="panel-head">
-                    <div>
-                        <div class="panel-title" data-i18n="network.title">Сетевой стек</div>
-                        <div class="panel-subtitle" data-i18n="network.subtitle">Выберите, должен ли nzapret держать перехват IPv6 активным или работать в отдельном режиме только для IPv4.</div>
-                    </div>
-                </div>
-
-                <div class="profile-slider-container">
-                    <div class="profile-slider network-mode-grid" id="networkModeSlider">
-                        <button class="profile-item network-mode-item" type="button" data-network-mode="auto" onclick="setNetworkMode('auto')">
-                            <span class="profile-item-label" data-i18n="network.auto_label">Авто</span>
-                            <span class="profile-item-meta" data-i18n="network.auto_meta">Использовать IPv4 и держать IPv6 наготове, когда он поддерживается.</span>
-                        </button>
-                        <button class="profile-item network-mode-item" type="button" data-network-mode="ipv4-only" onclick="setNetworkMode('ipv4-only')">
-                            <span class="profile-item-label" data-i18n="network.ipv4_only_label">Только IPv4</span>
-                            <span class="profile-item-meta" data-i18n="network.ipv4_only_meta">Не создавать правила ip6tables и IPv6 bind-fix при рестарте.</span>
-                        </button>
-                    </div>
-                </div>
-
-                <div class="user-list-footer">
-                    <span class="user-list-footnote" id="networkModeDirtyNote" data-i18n="network.dirty_none">Несохранённых изменений нет.</span>
-                    <button class="icon-btn primary user-list-save-btn" id="btnSaveNetworkMode" type="button" onclick="saveNetworkMode()" data-i18n="common.save">Сохранить</button>
                 </div>
             </div>
 

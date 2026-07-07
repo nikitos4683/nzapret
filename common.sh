@@ -2,7 +2,7 @@
 # nzapret — common.sh
 # Shared POSIX sh helpers sourced by service.sh and system/bin/nzapret.
 # Contains only side-effect-free helpers that both files need identically.
-# Callers must define their path constants (EVENTLOG, NETWORK_MODE_FILE,
+# Callers must define their path constants (EVENTLOG,
 # PRIVATE_DNS_INIT_FILE, DEFAULT_PRIVATE_DNS_HOSTNAME) before sourcing this file.
 
 # --- Generic ---
@@ -20,40 +20,20 @@ trim_setting_value() {
     printf '%s' "$1" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
 }
 
-# --- Network mode ---
-normalize_network_mode() {
-    case "$1" in
-        ""|"auto") echo "auto" ;;
-        "ipv4-only") echo "ipv4-only" ;;
-        *) echo "" ;;
-    esac
-}
-
+# --- IPv6 detection ---
+# Informational only: whether the current network currently has working IPv6.
+# The firewall does NOT gate on this (IPv6 availability is volatile and changes
+# after boot / on network switches); it gates on ip6tables capability instead.
 ipv6_network_available() {
     has_cmd ip || return 1
     ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 ' || return 1
     ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1
 }
 
-detect_default_network_mode() {
-    if ipv6_network_available; then
-        echo "auto"
-        return
-    fi
-    echo "ipv4-only"
-}
-
-get_configured_network_mode() {
-    if [ -f "$NETWORK_MODE_FILE" ]; then
-        _mode=$(head -n 1 "$NETWORK_MODE_FILE" 2>/dev/null | tr -d '\r\n')
-        _mode=$(normalize_network_mode "$_mode")
-        [ -n "$_mode" ] || _mode=$(detect_default_network_mode)
-        echo "$_mode"
-        return
-    fi
-    detect_default_network_mode
-}
-
+# Whether ip6tables can manage mangle rules (a static device capability).
+# This is the sole gate for bringing up the IPv6 firewall: idle IPv6 NFQUEUE
+# rules cost nothing when there is no IPv6 traffic, and are already in place to
+# protect IPv6 that appears later.
 ip6tables_supported() {
     has_cmd ip6tables || return 1
     ip6tables -w -t mangle -L >/dev/null 2>&1

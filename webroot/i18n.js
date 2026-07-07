@@ -39,7 +39,6 @@ const translations = {
             tg_port: 'Порт {{port}}',
             tg_port_cf: 'Порт {{port}} (CF)',
             labels: {
-                network_mode: 'Сетевой режим',
                 private_dns: 'Частный DNS',
                 telegram: 'Telegram',
                 domains: 'Домены',
@@ -117,28 +116,6 @@ const translations = {
             invalid_dc: 'Неверное правило DC: {{line}}',
             invalid_domain: 'Некорректный домен'
         },
-        network: {
-            title: 'Сетевой стек',
-            subtitle: 'Выберите, должен ли nzapret держать перехват IPv6 активным или работать в отдельном режиме только для IPv4.',
-            auto_label: 'Авто',
-            auto_meta: 'Использовать IPv4 и держать IPv6 наготове, если он поддерживается сетью.',
-            ipv4_only_label: 'Только IPv4',
-            ipv4_only_meta: 'Не создавать правила ip6tables и IPv6 bind-fix при перезапуске.',
-            dirty_none: 'Несохранённых изменений нет.',
-            dirty_unsaved: 'Есть несохранённые изменения.',
-            ipv6_unavailable: 'IPv6 недоступен. Включите IPv6 в настройках сети и вернитесь сюда.',
-            ipv6_checking: 'Проверка доступности IPv6...',
-            auto_requires_ipv6: 'Режим Авто требует активного IPv6-соединения',
-            enable_ipv6_hint: 'Включите IPv6 в настройках сети и вернитесь сюда',
-            saving: 'Сохранение сетевого режима...',
-            saving_restart: 'Сохранение сетевого режима и перезапуск nzapret...',
-            saved: 'Сетевой режим сохранён',
-            saved_restart: 'Сетевой режим сохранён, nzapret перезапущен',
-            saved_restart_failed: 'Сетевой режим сохранён, но перезапуск завершился с ошибкой',
-            mode_ipv4_only: 'Только IPv4',
-            mode_auto_dual: 'Авто (IPv4 + IPv6)',
-            mode_auto_fallback: 'Авто (откат на IPv4)'
-        },
         private_dns: {
             title: 'Частный DNS',
             subtitle_html: 'Управление Частным DNS в системе Android. При первом запуске службы nzapret автоматически установит <code>{{default_hostname}}</code>, если на устройстве ещё не задан другой DNS-провайдер.',
@@ -189,7 +166,7 @@ const translations = {
             names: {
                 process: 'Процесс {{subject}}',
                 userlist_binding: 'Привязка list-user',
-                network_mode: 'Сетевой режим',
+                ip_stack: 'IP-стек',
                 private_dns: 'Частный DNS',
                 routing_ipv4: 'Маршрутизация IPv4',
                 routing_ipv6: 'Маршрутизация IPv6'
@@ -197,19 +174,17 @@ const translations = {
             details: {
                 command_available: 'команда доступна',
                 command_missing: 'команда отсутствует',
-                ip6tables_not_required: 'не требуется в режиме только IPv4',
                 ip6tables_available: 'команда доступна',
                 ip6tables_unusable: 'присутствует, но не работает',
-                ip6tables_missing_fallback: 'команда отсутствует, авто-режим перейдёт в режим только IPv4',
+                ip6tables_missing_fallback: 'команда отсутствует, фаервол только для IPv4',
                 runtime_file_present: 'файл присутствует',
                 runtime_file_missing: 'файл отсутствует',
                 process_running: 'запущен (pid: {{pid}})',
                 process_not_running: 'не запущен',
                 userlist_attached: 'текущая конфигурация использует list-user.txt',
                 userlist_detached: 'текущая конфигурация не ссылается на list-user.txt',
-                network_ipv4_only: 'Только IPv4',
-                network_auto_dual: 'Авто (IPv4 + IPv6)',
-                network_auto_fallback: 'Авто (откат на IPv4)',
+                stack_ipv4_only: 'Только IPv4',
+                stack_dual: 'IPv4 + IPv6',
                 private_dns_unavailable: 'команда settings отсутствует',
                 private_dns_off: 'Выкл',
                 private_dns_auto: 'Авто',
@@ -218,10 +193,10 @@ const translations = {
                 private_dns_hostname_unspecified: 'адрес провайдера',
                 jump_present: 'переход присутствует',
                 jump_missing: 'переход отсутствует',
-                jump_skipped_ipv4_only: 'пропущено (путь только IPv4)',
+                jump_skipped_no_ipv6: 'пропущено (фаервол только для IPv4)',
                 routing_ok: 'маршрут доступен',
                 routing_fail: 'проверка маршрута завершилась с ошибкой',
-                routing_disabled: 'отключено режимом'
+                routing_unavailable: 'недоступно в этой сети'
             }
         },
         logs: {
@@ -305,7 +280,6 @@ const translations = {
             tg_port: 'Port {{port}}',
             tg_port_cf: 'Port {{port}} (CF)',
             labels: {
-                network_mode: 'Network Mode',
                 private_dns: 'Private DNS',
                 telegram: 'Telegram',
                 domains: 'Domains',
@@ -383,28 +357,6 @@ const translations = {
             invalid_dc: 'Invalid DC rule: {{line}}',
             invalid_domain: 'Invalid domain'
         },
-        network: {
-            title: 'Network Stack',
-            subtitle: 'Choose whether nzapret should keep IPv6 interception enabled or stay in a dedicated IPv4-only mode.',
-            auto_label: 'Auto',
-            auto_meta: 'Use IPv4 and keep IPv6 ready when supported.',
-            ipv4_only_label: 'IPv4 Only',
-            ipv4_only_meta: 'Skip ip6tables rules and IPv6 bind-fix on restart.',
-            dirty_none: 'No unsaved changes.',
-            dirty_unsaved: 'Unsaved changes.',
-            ipv6_unavailable: 'IPv6 is unavailable. Enable IPv6 in network settings, then return here.',
-            ipv6_checking: 'Checking IPv6 availability...',
-            auto_requires_ipv6: 'Auto mode requires active IPv6 connectivity',
-            enable_ipv6_hint: 'Enable IPv6 in network settings, then return here',
-            saving: 'Saving network mode...',
-            saving_restart: 'Saving network mode and restarting nzapret...',
-            saved: 'Network mode saved',
-            saved_restart: 'Network mode saved and nzapret restarted',
-            saved_restart_failed: 'Network mode saved, but restart failed',
-            mode_ipv4_only: 'IPv4 only',
-            mode_auto_dual: 'Auto (IPv4 + IPv6)',
-            mode_auto_fallback: 'Auto (IPv4 only fallback)'
-        },
         private_dns: {
             title: 'Private DNS',
             subtitle_html: 'Manage Android system Private DNS. nzapret will initialize <code>{{default_hostname}}</code> on the first service start unless the device already uses another provider hostname.',
@@ -455,7 +407,7 @@ const translations = {
             names: {
                 process: '{{subject}} process',
                 userlist_binding: 'list-user binding',
-                network_mode: 'network mode',
+                ip_stack: 'IP stack',
                 private_dns: 'private dns',
                 routing_ipv4: 'IPv4 routing',
                 routing_ipv6: 'IPv6 routing'
@@ -463,19 +415,17 @@ const translations = {
             details: {
                 command_available: 'command available',
                 command_missing: 'command missing',
-                ip6tables_not_required: 'not required in IPv4-only mode',
                 ip6tables_available: 'command available',
                 ip6tables_unusable: 'present but unusable',
-                ip6tables_missing_fallback: 'missing, auto mode will use IPv4-only fallback',
+                ip6tables_missing_fallback: 'missing, IPv4-only firewall',
                 runtime_file_present: 'file present',
                 runtime_file_missing: 'file missing',
                 process_running: 'running (pid: {{pid}})',
                 process_not_running: 'not running',
                 userlist_attached: 'current configuration includes list-user.txt',
                 userlist_detached: 'current configuration does not reference list-user.txt',
-                network_ipv4_only: 'IPv4 only',
-                network_auto_dual: 'Auto (IPv4 + IPv6)',
-                network_auto_fallback: 'Auto (IPv4 only fallback)',
+                stack_ipv4_only: 'IPv4 only',
+                stack_dual: 'IPv4 + IPv6',
                 private_dns_unavailable: 'settings command missing',
                 private_dns_off: 'Off',
                 private_dns_auto: 'Automatic',
@@ -484,10 +434,10 @@ const translations = {
                 private_dns_hostname_unspecified: 'Provider hostname',
                 jump_present: 'jump present',
                 jump_missing: 'jump missing',
-                jump_skipped_ipv4_only: 'skipped (IPv4-only path)',
+                jump_skipped_no_ipv6: 'skipped (IPv4-only firewall)',
                 routing_ok: 'route lookup works',
                 routing_fail: 'route lookup failed',
-                routing_disabled: 'disabled by mode'
+                routing_unavailable: 'not available on this network'
             }
         },
         logs: {

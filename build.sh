@@ -55,7 +55,6 @@ RUNTIME_ARTIFACTS=(
     ".list_count"
     ".private_dns_initialized"
     ".list-user.install.bak"
-    ".network-mode.install.bak"
     ".tgproxy.conf.install.bak"
     ".tg-secret.install.bak"
     ".tg_secret"
@@ -66,7 +65,6 @@ RUNTIME_ARTIFACTS=(
     "nzapret-events.log"
     "nztg.log"
     "nztg.log.prev"
-    "profiles/network.mode"
 )
 
 EXECUTABLE_PATHS=(
@@ -162,7 +160,6 @@ create_zip_archive() {
         -x ".list_count" \
         -x ".private_dns_initialized" \
         -x ".list-user.install.bak" \
-        -x ".network-mode.install.bak" \
         -x ".tgproxy.conf.install.bak" \
         -x ".tg-secret.install.bak" \
         -x ".tg_secret" \
@@ -173,7 +170,6 @@ create_zip_archive() {
         -x "nzapret-events.log" \
         -x "nztg.log" \
         -x "nztg.log.prev" \
-        -x "profiles/network.mode" \
         -x "*.tmp" \
         -x "Thumbs.db" \
         -x ".DS_Store"

@@ -93,7 +93,6 @@ let activePage = 'runtime';
 let activeLogView = 'runtime';
 let currentStatus = null;
 let statusViewState = 'checking';
-let networkModeDraft = '';
 let userListEntries = [];
 let userListLoaded = false;
 let userListRequestInFlight = false;
@@ -189,20 +188,6 @@ function rerenderToast() {
     toast.textContent = resolveMessage(toastState.message, toastState.params, toastState.translate);
 }
 
-function getSelectedNetworkMode(status = currentStatus) {
-    if (networkModeDraft) {
-        return networkModeDraft;
-    }
-    return status && status.network_mode ? status.network_mode : '';
-}
-
-function isNetworkModeDirty(status = currentStatus) {
-    if (!status || !status.network_mode || !networkModeDraft) {
-        return false;
-    }
-    return networkModeDraft !== status.network_mode;
-}
-
 function getPrivateDnsDefaultHostname(status = currentStatus) {
     return status && status.private_dns_default_hostname
         ? status.private_dns_default_hostname
@@ -236,20 +221,6 @@ function getStatusLabel() {
     return currentStatus.active
         ? t('status.active')
         : t('status.inactive');
-}
-
-function getNetworkModeDisplayLabel(status = currentStatus) {
-    if (!status || !status.network_mode) {
-        return '--';
-    }
-
-    if (status.network_mode === 'ipv4-only') {
-        return t('network.mode_ipv4_only');
-    }
-
-    return status.ipv6_enabled
-        ? t('network.mode_auto_dual')
-        : t('network.mode_auto_fallback');
 }
 
 function getPrivateDnsStatusCode(status = currentStatus) {
@@ -332,7 +303,6 @@ function renderStatusCard() {
     if (!currentStatus) {
         document.getElementById('pidBadge').textContent = 'nfqws2 --';
         document.getElementById('tgPidBadge').textContent = 'nztg --';
-        document.getElementById('networkModeLabel').textContent = '--';
         document.getElementById('privateDnsLabel').textContent = '--';
         document.getElementById('tgStatusValue').textContent = '--';
         document.getElementById('rulesV4').textContent = '?';
@@ -356,7 +326,6 @@ function renderStatusCard() {
     document.getElementById('pidBadge').textContent = pidCount > 1 ? `nfqws2 ${pid} +${pidCount - 1}` : `nfqws2 ${pid}`;
     const tgPidBadge = document.getElementById('tgPidBadge');
     tgPidBadge.textContent = `nztg ${status.tg_pid || '--'}`;
-    document.getElementById('networkModeLabel').textContent = getNetworkModeDisplayLabel(status);
     document.getElementById('privateDnsLabel').textContent = getPrivateDnsDisplayLabel(status);
     if (status.tg_active) {
         const port = status.tg_port || '1443';
@@ -379,54 +348,8 @@ function renderStatusCard() {
     label.textContent = getStatusLabel();
 }
 
-function renderNetworkModeControls(status = currentStatus) {
-    const dirtyNote = document.getElementById('networkModeDirtyNote');
-    const saveButton = document.getElementById('btnSaveNetworkMode');
-    const buttons = document.querySelectorAll('[data-network-mode]');
-    const mode = getSelectedNetworkMode(status);
-    const dirty = isNetworkModeDirty(status);
-    const controlsDisabled = isLoading || !status;
-    const autoUnavailable = Boolean(status && status.ipv6_available === false);
-    const selectedAutoUnavailable = mode === 'auto' && autoUnavailable;
-
-    if (dirtyNote) {
-        if (!status) {
-            dirtyNote.textContent = t('network.dirty_none');
-        } else if (autoUnavailable) {
-            dirtyNote.textContent = t('network.ipv6_unavailable');
-        } else {
-            dirtyNote.textContent = dirty ? t('network.dirty_unsaved') : t('network.dirty_none');
-        }
-        dirtyNote.classList.toggle('warning', dirty || autoUnavailable);
-    }
-
-    buttons.forEach((button) => {
-        const active = mode && button.dataset.networkMode === mode;
-        const unavailable = button.dataset.networkMode === 'auto' && autoUnavailable && !active;
-        button.classList.toggle('active', active);
-        button.title = unavailable ? t('network.enable_ipv6_hint') : '';
-        setButtonDisabled(button, controlsDisabled || unavailable);
-    });
-
-    if (saveButton) {
-        saveButton.textContent = status && status.active ? t('common.save_restart') : t('common.save');
-        setButtonDisabled(saveButton, controlsDisabled || !dirty || selectedAutoUnavailable);
-    }
-}
-
-function showNetworkModeCheckingHint() {
-    if (!currentStatus || currentStatus.ipv6_available !== false) return;
-
-    const dirtyNote = document.getElementById('networkModeDirtyNote');
-    if (!dirtyNote) return;
-
-    dirtyNote.textContent = t('network.ipv6_checking');
-    dirtyNote.classList.add('warning');
-}
-
 function refreshStatusFromUiEvent() {
     if (isLoading) return;
-    showNetworkModeCheckingHint();
     refreshStatus(true);
 }
 
@@ -733,8 +656,8 @@ function getLocalizedDiagnoseName(check) {
             return t('diagnostics.names.process', { subject: check.subject || 'nfqws2' });
         case 'userlist_binding':
             return t('diagnostics.names.userlist_binding');
-        case 'network_mode':
-            return t('diagnostics.names.network_mode');
+        case 'ip_stack':
+            return t('diagnostics.names.ip_stack');
         case 'private_dns':
             return t('diagnostics.names.private_dns');
         case 'routing':
@@ -759,7 +682,6 @@ function getLocalizedDiagnoseDetail(check) {
             if (check.detail_code === 'missing') return t('diagnostics.details.command_missing');
             break;
         case 'ip6tables_runtime':
-            if (check.detail_code === 'not_required') return t('diagnostics.details.ip6tables_not_required');
             if (check.detail_code === 'available') return t('diagnostics.details.ip6tables_available');
             if (check.detail_code === 'unusable') return t('diagnostics.details.ip6tables_unusable');
             if (check.detail_code === 'missing_fallback') return t('diagnostics.details.ip6tables_missing_fallback');
@@ -776,10 +698,9 @@ function getLocalizedDiagnoseDetail(check) {
             if (check.detail_code === 'attached') return t('diagnostics.details.userlist_attached');
             if (check.detail_code === 'detached') return t('diagnostics.details.userlist_detached');
             break;
-        case 'network_mode':
-            if (check.detail_code === 'ipv4_only') return t('diagnostics.details.network_ipv4_only');
-            if (check.detail_code === 'auto_dual_stack') return t('diagnostics.details.network_auto_dual');
-            if (check.detail_code === 'auto_ipv4_fallback') return t('diagnostics.details.network_auto_fallback');
+        case 'ip_stack':
+            if (check.detail_code === 'ipv4_only') return t('diagnostics.details.stack_ipv4_only');
+            if (check.detail_code === 'dual_stack') return t('diagnostics.details.stack_dual');
             break;
         case 'private_dns':
             if (check.detail_code === 'unavailable') return t('diagnostics.details.private_dns_unavailable');
@@ -800,12 +721,12 @@ function getLocalizedDiagnoseDetail(check) {
         case 'jump_rule':
             if (check.detail_code === 'present') return t('diagnostics.details.jump_present');
             if (check.detail_code === 'missing') return t('diagnostics.details.jump_missing');
-            if (check.detail_code === 'skipped_ipv4_only') return t('diagnostics.details.jump_skipped_ipv4_only');
+            if (check.detail_code === 'skipped_no_ipv6') return t('diagnostics.details.jump_skipped_no_ipv6');
             break;
         case 'routing':
             if (check.detail_code === 'ok') return t('diagnostics.details.routing_ok');
             if (check.detail_code === 'fail') return t('diagnostics.details.routing_fail');
-            if (check.detail_code === 'disabled') return t('diagnostics.details.routing_disabled');
+            if (check.detail_code === 'unavailable') return t('diagnostics.details.routing_unavailable');
             break;
         default:
             break;
@@ -1085,7 +1006,6 @@ function renderRuntimePageUi(status = currentStatus) {
 }
 
 function renderToolsPageUi(status = currentStatus) {
-    renderNetworkModeControls(status);
     renderPrivateDnsControls(status);
     updateUserListEditorState();
     renderTgCard();
@@ -1269,71 +1189,6 @@ async function doAction(command) {
     });
 
     if (button) button.classList.remove('loading');
-}
-
-async function setNetworkMode(mode) {
-    if (isLoading || !currentStatus) return;
-    if (mode === 'auto' && currentStatus.ipv6_available === false && currentStatus.network_mode !== 'auto') {
-        showToast('network.auto_requires_ipv6');
-        return;
-    }
-
-    if (currentStatus.network_mode === mode) {
-        networkModeDraft = '';
-    } else {
-        networkModeDraft = mode;
-    }
-
-    renderNetworkModeControls(currentStatus);
-}
-
-async function saveNetworkMode() {
-    if (isLoading || !currentStatus || !isNetworkModeDirty(currentStatus)) return;
-
-    const selectedMode = getSelectedNetworkMode(currentStatus);
-    if (selectedMode === 'auto' && currentStatus.ipv6_available === false) {
-        showToast('network.auto_requires_ipv6');
-        return;
-    }
-
-    const shouldRestart = Boolean(currentStatus.active);
-
-    isLoading = true;
-    setUiLocked(true, shouldRestart ? 'network.saving_restart' : 'network.saving');
-    await waitForPaint();
-
-    let savedMode = false;
-    try {
-        const saveRes = await exec(`${CLI} network set ${shellQuote(selectedMode)}`);
-        if (saveRes.errno !== 0) {
-            throw new Error(combineOutput(saveRes) || 'network set failed');
-        }
-        savedMode = true;
-
-        if (shouldRestart) {
-            const restartRes = await exec(`${CLI} restart`);
-            if (restartRes.errno !== 0) {
-                throw new Error(combineOutput(restartRes) || 'restart failed');
-            }
-        }
-
-        networkModeDraft = '';
-        await Promise.all([refreshStatus(true), refreshActiveLogView()]);
-        showToast(shouldRestart ? 'network.saved_restart' : 'network.saved');
-    } catch (error) {
-        if (savedMode) {
-            networkModeDraft = '';
-            await refreshStatus(true);
-            showToast(shouldRestart ? 'network.saved_restart_failed' : 'network.saved');
-        } else {
-            showToast('generic.error_with_message', { message: error.message });
-        }
-    } finally {
-        isLoading = false;
-        setUiLocked(false);
-        renderRuntimePageUi();
-        renderToolsPageUi();
-    }
 }
 
 async function setPrivateDnsMode(mode) {
@@ -1821,8 +1676,6 @@ document.addEventListener('visibilitychange', () => {
 
 window.doAction = doAction;
 window.setPage = setPage;
-window.setNetworkMode = setNetworkMode;
-window.saveNetworkMode = saveNetworkMode;
 window.setPrivateDnsMode = setPrivateDnsMode;
 window.setPrivateDnsDefault = setPrivateDnsDefault;
 window.applyPrivateDnsHostname = applyPrivateDnsHostname;

@@ -26,16 +26,14 @@ TG_LOGFILE="$MODDIR/nztg.log"
 TG_PROCESS_NAME="nztg"
 PROFILE_DIR="$MODDIR/profiles"
 ACTIVE_PROFILE_FILE="$PROFILE_DIR/profile.current"
-NETWORK_MODE_FILE="$PROFILE_DIR/network.mode"
 PRIVATE_DNS_INIT_FILE="$MODDIR/.private_dns_initialized"
 DEFAULT_PROFILE="default"
 DEFAULT_PRIVATE_DNS_HOSTNAME="xbox-dns.ru"
 PROCESS_NAME="nfqws2"
 START_MODE="${1:-boot}"
-NETWORK_MODE=""
 IPV6_ENABLED=0
 
-# Shared helpers (logging, network mode, IPv6 detection, Private DNS, settings I/O).
+# Shared helpers (logging, IPv6 detection, Private DNS, settings I/O).
 . "$MODDIR/common.sh"
 
 # Emergency exit: rolls back iptables and kills nfqws2 to prevent unstable state.
@@ -57,43 +55,24 @@ require_file() {
 ensure_runtime_layout() {
     mkdir -p "$PROFILE_DIR" "$LISTS" || fail "mkdir -p failed"
     ensure_user_list_file
-    ensure_network_mode_file
 }
 
 ensure_user_list_file() {
     [ -f "$USER_LIST_FILE" ] || : > "$USER_LIST_FILE" || fail "cannot create $USER_LIST_FILE"
 }
 
-ensure_network_mode_file() {
-    _mode=$(get_configured_network_mode)
-    if [ ! -f "$NETWORK_MODE_FILE" ]; then
-        printf '%s\n' "$_mode" > "$NETWORK_MODE_FILE" || fail "cannot create $NETWORK_MODE_FILE"
-        return
+# The firewall stack is decided by ip6tables capability alone, not by the
+# current (volatile) IPv6 reachability. When ip6tables works we always lay down
+# IPv6 NFQUEUE rules: they are free when no IPv6 traffic exists and already in
+# place to protect IPv6 that comes up after boot or after a network switch.
+resolve_firewall_stack() {
+    if ip6tables_supported; then
+        IPV6_ENABLED=1
+        log_event NETWORK "IPv6 firewall enabled (ip6tables available)"
+    else
+        IPV6_ENABLED=0
+        log_event NETWORK "IPv6 firewall disabled (ip6tables unavailable)"
     fi
-
-    _raw_mode=$(head -n 1 "$NETWORK_MODE_FILE" 2>/dev/null | tr -d '\r\n')
-    if [ "$_raw_mode" != "$_mode" ]; then
-        printf '%s\n' "$_mode" > "$NETWORK_MODE_FILE" || fail "cannot normalize $NETWORK_MODE_FILE"
-    fi
-}
-
-resolve_network_mode() {
-    NETWORK_MODE=$(get_configured_network_mode)
-    case "$NETWORK_MODE" in
-        "ipv4-only")
-            IPV6_ENABLED=0
-            log_event NETWORK "mode ipv4-only: IPv6 firewall disabled"
-            ;;
-        *)
-            if ipv6_network_available && ip6tables_supported; then
-                IPV6_ENABLED=1
-                log_event NETWORK "mode auto: IPv4 + IPv6 firewall enabled"
-            else
-                IPV6_ENABLED=0
-                log_event NETWORK "mode auto: IPv6 unavailable, using IPv4-only firewall"
-            fi
-            ;;
-    esac
 }
 
 set_private_dns_hostname_mode() {
@@ -407,7 +386,7 @@ require_cmd iptables
 require_cmd killall
 ensure_runtime_layout
 ensure_private_dns_initialized
-resolve_network_mode
+resolve_firewall_stack
 
 # Prepare binaries
 require_file "$BIN"

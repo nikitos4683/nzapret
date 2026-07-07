@@ -7,12 +7,10 @@ BIN_DIR="$MODPATH/bin"
 LISTS_DIR="$MODPATH/lists"
 PROFILE_DIR="$MODPATH/profiles"
 ACTIVE_PROFILE_FILE="$MODPATH/profiles/profile.current"
-NETWORK_MODE_FILE="$PROFILE_DIR/network.mode"
 USER_LIST_FILE="$LISTS_DIR/list-user.txt"
 LIVE_MODULE_DIR="/data/adb/modules/$MODULE_ID"
 UPDATE_MODULE_DIR="/data/adb/modules_update/$MODULE_ID"
 PRESERVED_USER_LIST_FILE="$MODPATH/.list-user.install.bak"
-PRESERVED_NETWORK_MODE_FILE="$MODPATH/.network-mode.install.bak"
 TGPROXY_CONF_FILE="$MODPATH/tgproxy.conf"
 TG_SECRET_FILE="$MODPATH/.tg_secret"
 PRESERVED_TGPROXY_CONF="$MODPATH/.tgproxy.conf.install.bak"
@@ -70,29 +68,6 @@ restore_tgproxy_state() {
     rm -f "$PRESERVED_TGPROXY_CONF" "$PRESERVED_TG_SECRET"
 }
 
-normalize_network_mode() {
-    _mode=$(printf '%s' "$1" | tr -d '\r\n')
-    case "$_mode" in
-        "auto"|"ipv4-only") echo "$_mode" ;;
-        *) echo "" ;;
-    esac
-}
-
-preserve_network_mode() {
-    rm -f "$PRESERVED_NETWORK_MODE_FILE"
-    for _mode_candidate in \
-        "$NETWORK_MODE_FILE" \
-        "$LIVE_MODULE_DIR/profiles/network.mode" \
-        "$UPDATE_MODULE_DIR/profiles/network.mode"
-    do
-        [ -f "$_mode_candidate" ] || continue
-        _mode=$(normalize_network_mode "$(head -n 1 "$_mode_candidate" 2>/dev/null)")
-        [ -n "$_mode" ] || continue
-        printf '%s\n' "$_mode" > "$PRESERVED_NETWORK_MODE_FILE" || abort "! Failed to preserve network mode"
-        return
-    done
-}
-
 prepare_directories() {
     mkdir -p "$BIN_DIR" "$LISTS_DIR" "$PROFILE_DIR"
 }
@@ -104,16 +79,6 @@ restore_user_list() {
     fi
     [ -f "$USER_LIST_FILE" ] || : > "$USER_LIST_FILE"
     rm -f "$PRESERVED_USER_LIST_FILE"
-}
-
-restore_network_mode() {
-    if [ -f "$PRESERVED_NETWORK_MODE_FILE" ]; then
-        _mode=$(normalize_network_mode "$(head -n 1 "$PRESERVED_NETWORK_MODE_FILE" 2>/dev/null)")
-        if [ -n "$_mode" ]; then
-            printf '%s\n' "$_mode" > "$NETWORK_MODE_FILE" || abort "! Failed to restore network mode"
-        fi
-    fi
-    rm -f "$PRESERVED_NETWORK_MODE_FILE"
 }
 
 # Restore the previous active profile pointer if one existed.
@@ -158,7 +123,6 @@ configure_permissions() {
 
 read_preserved_profile
 preserve_user_list
-preserve_network_mode
 preserve_tgproxy_state
 
 ui_print "- Preparing module files..."
@@ -167,7 +131,6 @@ unzip -oq "$ZIPFILE" -x 'META-INF/*' -d "$MODPATH" || abort "! Failed to extract
 # Rebuild the module layout from the fresh payload, then restore mutable state.
 prepare_directories
 restore_user_list
-restore_network_mode
 restore_tgproxy_state
 restore_active_profile
 select_arch_binary

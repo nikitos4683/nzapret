@@ -722,10 +722,6 @@ body.ui-busy .icon-btn {
     color: rgba(255, 255, 255, 0.74);
 }
 
-.network-mode-item {
-    min-height: 62px;
-}
-
 .network-mode-grid .profile-item-meta {
     white-space: normal;
     line-height: 1.4;
