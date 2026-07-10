@@ -27,7 +27,7 @@ Just like `nfqws2` serves as the DPI engine for web traffic, `nztg` handles main
 * **🔄 WebSocket-over-TLS (WSS):** Wraps standard MTProto traffic into secure WebSocket frames to evade DPI signature analysis and IP-based blocks.
 * **☁️ Cloudflare Proxy Fallback:** Automatically falls back to Cloudflare Workers / CDN Fronting if direct Telegram WebSocket server IPs are blocked by your ISP.
 * **🔌 Smart DNS Resolver:** Built-in resolution using public DNS servers (`1.1.1.1`, `8.8.8.8`, `9.9.9.9`) to circumvent the lack of a proper `/etc/resolv.conf` in Android environments when CGO is disabled.
-* **🪶 CGO-free Static ELF:** Compiled with `CGO_ENABLED=0` to run seamlessly on any Android kernel without dependencies on system dynamic libraries.
+* **🍃 CGO-free Static ELF:** Compiled with `CGO_ENABLED=0` to run seamlessly on any Android kernel without dependencies on system dynamic libraries.
 * **📦 Complete Integration:** Tailored to be run and managed automatically by the `nzapret` module CLI commands.
 
 ---
@@ -42,10 +42,11 @@ Just like `nfqws2` serves as the DPI engine for web traffic, `nztg` handles main
 - [x] Bidirectional re-encrypting bridge.
 - [x] Direct TCP fallback to Telegram's default DC IPs if WSS is blocked.
 - [x] Cloudflare proxy availability test (`cftest`).
+- [x] Domain balancer (sticky per-DC domain + shuffled pool fallback).
 
 ### ⏳ Planned (Backlog):
 - [ ] Fake TLS masking (`ee`-secrets).
-- [ ] WebSocket connection pooling and domain load balancing.
+- [ ] Reusable WebSocket connection pool.
 
 ---
 
