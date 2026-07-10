@@ -45,7 +45,6 @@ Just like `nfqws2` serves as the DPI engine for web traffic, `nztg` handles main
 - [x] Domain balancer (sticky per-DC domain + shuffled pool fallback).
 
 ### ⏳ Planned (Backlog):
-- [ ] Fake TLS masking (`ee`-secrets).
 - [ ] Reusable WebSocket connection pool.
 
 ---
