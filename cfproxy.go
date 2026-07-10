@@ -21,7 +21,7 @@ import (
 // bridges to Telegram — so the client reaches CF (not blocked) instead of the
 // Telegram IP. Mirrors proxy/config.py + proxy/balancer.py + _cfproxy_fallback.
 
-const cfproxyDomainsURL = "https://raw.githubusercontent.com/Flowseal/tg-ws-proxy/main/.github/cfproxy-domains.txt"
+const cfproxyDomainsURL = "https://raw.githubusercontent.com/nikitos4683/nzapret/nztg/.github/cfproxy-domains.txt"
 
 // cfEncodedDefaults are the obfuscated fallback domains baked in as a floor when
 // the GitHub refresh is unavailable. Decoded via ddDecode at startup.

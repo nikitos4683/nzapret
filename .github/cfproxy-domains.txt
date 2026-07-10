@@ -1,0 +1,25 @@
+# nztgproxy Cloudflare-fronted fallback domains.
+# One obfuscated entry per line; blank lines and #-comments are ignored.
+# Entries are decoded at runtime by ddDecode (encoded ".com" stem -> ".co.uk").
+# Mirrors the baked-in cfEncodedDefaults; self-hosted after the upstream
+# Flowseal/tg-ws-proxy list was removed. Keep in sync with cfproxy.go.
+virkgj.com
+vmmzovy.com
+mkuosckvso.com
+zaewayzmplad.com
+twdmbzcm.com
+awzwsldi.com
+clngqrflngqin.com
+tjacxbqtj.com
+bxaxtxmrw.com
+dmohrsgmohcrwb.com
+vwbmtmoi.com
+khgrre.com
+ulihssf.com
+tmhqsdqmfpmk.com
+xwuwoqbm.com
+orgcnunpj.com
+zhkuldz.com
+zypoljnslxa.com
+efabnxaowuzs.com
+zaftuzsftqdq.com
