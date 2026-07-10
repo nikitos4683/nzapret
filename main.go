@@ -29,6 +29,7 @@ type config struct {
 	cfUserDomains []string
 	linkFile      string
 	verbose       bool
+	preResolve    bool
 }
 
 var cfg config
@@ -73,6 +74,7 @@ func main() {
 		dcIP       arrayFlags
 		cfDomain   arrayFlags
 		noCF       = flag.Bool("no-cfproxy", false, "disable the Cloudflare proxy fallback")
+		noResolve  = flag.Bool("no-preresolve", false, "disable startup DC route pre-resolution")
 		linkFile   = flag.String("link-file", "", "write the tg:// proxy link to this path")
 		verboseF   = flag.Bool("verbose", false, "debug logging")
 	)
@@ -105,6 +107,7 @@ func main() {
 		cfUserDomains: coerceDomains(cfDomain),
 		linkFile:      *linkFile,
 		verbose:       verbose,
+		preResolve:    !*noResolve,
 	}
 
 	link := ddLink(cfg.host, cfg.port, cfg.secret)
@@ -144,6 +147,10 @@ func serve() error {
 
 	if cfg.fallbackCF {
 		initCFDomains()
+	}
+
+	if cfg.preResolve {
+		go routeResolverLoop()
 	}
 
 	for {
