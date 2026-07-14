@@ -26,7 +26,7 @@ is_running() {
 print_status_summary() {
     echo ""
     echo "[*] Current Status:"
-    "$CLI" status | grep -E 'nfqws2:|nztg:|iptables rules:|Firewall stack:|Private DNS:'
+    "$CLI" status | grep -E 'Module version:|nfqws2:|nztg:|iptables rules:|Firewall stack:|Private DNS:|list-'
 }
 
 print_header

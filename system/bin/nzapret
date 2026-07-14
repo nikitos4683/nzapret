@@ -1183,6 +1183,7 @@ case "$1" in
         if start_service; then
             _pid=$(get_first_pid)
             echo "[+] nfqws2 started successfully (PID: $_pid)"
+            tg_active && echo "[+] nztg started successfully (PID: $(tg_pid))"
         else
             echo "[-] Failed to start nfqws2. Check 'nzapret log' for details."
             exit 1
@@ -1212,6 +1213,7 @@ case "$1" in
         if start_service; then
             _pid=$(get_first_pid)
             echo "[+] nfqws2 restarted successfully (PID: $_pid)"
+            tg_active && echo "[+] nztg restarted successfully (PID: $(tg_pid))"
         else
             echo "[-] Failed to restart nfqws2. Check 'nzapret log' for details."
             exit 1
