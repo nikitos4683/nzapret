@@ -43,9 +43,7 @@ Just like `nfqws2` serves as the DPI engine for web traffic, `nztg` handles main
 - [x] Direct TCP fallback to Telegram's default DC IPs if WSS is blocked.
 - [x] Cloudflare proxy availability test (`cftest`).
 - [x] Domain balancer (sticky per-DC domain + shuffled pool fallback).
-
-### ⏳ Planned (Backlog):
-- [ ] Reusable WebSocket connection pool.
+- [x] DC route pre-resolution (direct-path probing at startup and every 30 min, fallback preselection when blocked).
 
 ---
 
