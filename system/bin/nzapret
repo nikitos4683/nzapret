@@ -839,17 +839,19 @@ print_tg_status_json() {
     _p=$(get_tg_conf port "$DEFAULT_TG_PORT")
     _cf=$(get_tg_conf cf_enabled 1)
     _cfd=$(get_tg_conf cf_domain "")
+    _pre=$(get_tg_conf preresolve_enabled 1)
     _sec=$(get_tg_secret)
     _link=$(get_tg_link)
     if [ "$_cf" = "0" ]; then _cfb=false; else _cfb=true; fi
+    if [ "$_pre" = "0" ]; then _preb=false; else _preb=true; fi
     if tg_active; then _act=true; else _act=false; fi
     _tpid=$(tg_pid)
     _dcs=$(get_tg_dc_lines | while IFS= read -r _d; do
         [ -n "$_d" ] && printf '"%s",' "$(json_escape "$_d")"
     done)
     _dcs=${_dcs%,}
-    printf '{"host":"%s","port":"%s","secret":"%s","link":"%s","dc_redirects":[%s],"cf_enabled":%s,"cf_domain":"%s","active":%s,"pid":"%s"}\n' \
-        "$(json_escape "$_h")" "$(json_escape "$_p")" "$(json_escape "$_sec")" "$(json_escape "$_link")" "$_dcs" "$_cfb" "$(json_escape "$_cfd")" "$_act" "$(json_escape "$_tpid")"
+    printf '{"host":"%s","port":"%s","secret":"%s","link":"%s","dc_redirects":[%s],"cf_enabled":%s,"cf_domain":"%s","preresolve_enabled":%s,"active":%s,"pid":"%s"}\n' \
+        "$(json_escape "$_h")" "$(json_escape "$_p")" "$(json_escape "$_sec")" "$(json_escape "$_link")" "$_dcs" "$_cfb" "$(json_escape "$_cfd")" "$_preb" "$_act" "$(json_escape "$_tpid")"
 }
 
 stop_tgproxy() {
@@ -1578,6 +1580,14 @@ case "$1" in
                     "cf-domain")
                         tg_set_single cf_domain "$4" || { echo "[-] Failed to save"; exit 1; }
                         ;;
+                    "preresolve")
+                        case "$4" in
+                            on|1|true|enabled)  _prev=1 ;;
+                            off|0|false|disabled) _prev=0 ;;
+                            *) echo "Usage: nzapret tg set preresolve <on|off>"; exit 1 ;;
+                        esac
+                        tg_set_single preresolve_enabled "$_prev" || { echo "[-] Failed to save"; exit 1; }
+                        ;;
                     "dc")
                         _dcclean=$(printf '%s\n' "$4" | validate_tg_dc_rules) || {
                             echo "[-] Invalid DC rules (expected 'number:IP' per line)"
@@ -1586,7 +1596,7 @@ case "$1" in
                         tg_set_dc "$_dcclean" || { echo "[-] Failed to save"; exit 1; }
                         ;;
                     *)
-                        echo "Usage: nzapret tg set <host|port|cf|cf-domain|dc> <value>"
+                        echo "Usage: nzapret tg set <host|port|cf|cf-domain|preresolve|dc> <value>"
                         exit 1
                         ;;
                 esac

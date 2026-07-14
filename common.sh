@@ -127,6 +127,7 @@ ensure_tgproxy_conf() {
         printf 'port=%s\n' "$DEFAULT_TG_PORT"
         printf 'cf_enabled=1\n'
         printf 'cf_domain=\n'
+        printf 'preresolve_enabled=1\n'
         printf 'dc=%s\n' "$DEFAULT_TG_DC_A"
         printf 'dc=%s\n' "$DEFAULT_TG_DC_B"
     } > "$TGPROXY_CONF" 2>/dev/null
@@ -160,4 +161,5 @@ tg_build_args() {
     for _tcfd in $(get_tg_conf cf_domain ""); do
         [ -n "$_tcfd" ] && printf ' --cfproxy-domain %s' "$_tcfd"
     done
+    [ "$(get_tg_conf preresolve_enabled 1)" = "0" ] && printf ' --no-preresolve'
 }

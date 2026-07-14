@@ -1401,7 +1401,8 @@ function tgInputs() {
         dc: document.getElementById('tgDc'),
         cfEnabled: document.getElementById('tgCfEnabled'),
         cfDomainEnabled: document.getElementById('tgCfDomainEnabled'),
-        cfDomain: document.getElementById('tgCfDomain')
+        cfDomain: document.getElementById('tgCfDomain'),
+        preResolve: document.getElementById('tgPreresolve')
     };
 }
 
@@ -1421,7 +1422,8 @@ function getTgDraft() {
         port: el.port.value.trim(),
         dc: parseDcLines(el.dc.value),
         cfEnabled: el.cfEnabled.checked,
-        cfDomain: el.cfDomainEnabled.checked ? el.cfDomain.value.trim() : ''
+        cfDomain: el.cfDomainEnabled.checked ? el.cfDomain.value.trim() : '',
+        preResolve: el.preResolve.checked
     };
 }
 
@@ -1457,6 +1459,7 @@ function renderTgCard() {
         const dom = tgConfig.cf_domain || '';
         el.cfDomainEnabled.checked = Boolean(dom);
         el.cfDomain.value = dom;
+        el.preResolve.checked = tgConfig.preresolve_enabled !== false;
         tgSnapshot = JSON.stringify(getTgDraft());
     }
     updateTgDirtyNote();
@@ -1520,6 +1523,9 @@ async function saveTgSettings() {
     }
     if (draft.cfDomain !== (prev.cf_domain || '')) {
         cmds.push(`tg set cf-domain ${shellQuote(draft.cfDomain)}`);
+    }
+    if (draft.preResolve !== (prev.preresolve_enabled !== false)) {
+        cmds.push(`tg set preresolve ${draft.preResolve ? 'on' : 'off'}`);
     }
 
     if (!cmds.length) {

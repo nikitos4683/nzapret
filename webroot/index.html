@@ -204,6 +204,12 @@
                     <button class="icon-btn" id="btnTgCfTest" type="button" onclick="testCfProxy()" data-i18n="tg.cf_test">Тест CF-прокси</button>
                 </div>
 
+                <label class="tg-check">
+                    <input type="checkbox" id="tgPreresolve">
+                    <span data-i18n="tg.preresolve_enable">Предрезолв маршрутов DC</span>
+                </label>
+                <div class="tools-support-line tg-tooltip" data-i18n="tg.preresolve_tooltip">Проверяет прямой путь к каждому DC при старте, чтобы первое подключение не ждало таймаут. При блокировке сразу выбирается запасной маршрут.</div>
+
                 <div class="user-list-footer">
                     <span class="user-list-footnote" id="tgDirtyNote" data-i18n="tg.dirty_none">Несохранённых изменений нет.</span>
                     <button class="icon-btn primary user-list-save-btn" id="btnSaveTg" type="button" onclick="saveTgSettings()" data-i18n="common.save">Сохранить</button>
