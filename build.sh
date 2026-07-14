@@ -13,10 +13,10 @@ export GOOS=linux
 
 echo "[*] Building nztgproxy binaries -> $OUT_DIR"
 
-GOARCH=arm64                 go build -trimpath -ldflags="$LDFLAGS" -o "$OUT_DIR/nztg-arm64" .
-GOARCH=arm GOARM=7           go build -trimpath -ldflags="$LDFLAGS" -o "$OUT_DIR/nztg-arm"   .
-GOARCH=amd64                 go build -trimpath -ldflags="$LDFLAGS" -o "$OUT_DIR/nztg-x64"   .
-GOARCH=386                   go build -trimpath -ldflags="$LDFLAGS" -o "$OUT_DIR/nztg-x86"   .
+GOARCH=arm64                 go build -trimpath -ldflags="$LDFLAGS" -o "$OUT_DIR/nztg-arm64" ./src
+GOARCH=arm GOARM=7           go build -trimpath -ldflags="$LDFLAGS" -o "$OUT_DIR/nztg-arm"   ./src
+GOARCH=amd64                 go build -trimpath -ldflags="$LDFLAGS" -o "$OUT_DIR/nztg-x64"   ./src
+GOARCH=386                   go build -trimpath -ldflags="$LDFLAGS" -o "$OUT_DIR/nztg-x86"   ./src
 
 echo "[+] Done:"
 ls -la "$OUT_DIR"/nztg-*

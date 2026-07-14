@@ -115,13 +115,13 @@ Once running, copy the generated `tg://proxy` link from the log or the specified
 
 The server codebase is organized into modular files:
 
-* 🔌 [main.go](main.go) — Entry point, flag parsing, TCP listener startup, and system signal handling.
-* 🌁 [bridge.go](bridge.go) — Data transfer bridge (pipe) logic between the Telegram client and servers.
-* ☁️ [cfproxy.go](cfproxy.go) — Cloudflare integration and proxy testing logic.
-* 🔐 [crypto.go](crypto.go) — Obfuscated MTProto decoding and AES-CTR-128 cryptographic operations.
-* 📡 [dns.go](dns.go) — Custom name resolver bypassing default DNS limits on Android.
-* ✂️ [splitter.go](splitter.go) — Packet framing logic slicing MTProto packets into WebSocket frames.
-* 🌐 [websocket.go](websocket.go) — TLS WebSocket connection initialization with custom headers.
+* 🔌 [main.go](src/main.go) — Entry point, flag parsing, TCP listener startup, and system signal handling.
+* 🌁 [bridge.go](src/bridge.go) — Data transfer bridge (pipe) logic between the Telegram client and servers.
+* ☁️ [cfproxy.go](src/cfproxy.go) — Cloudflare integration and proxy testing logic.
+* 🔐 [crypto.go](src/crypto.go) — Obfuscated MTProto decoding and AES-CTR-128 cryptographic operations.
+* 📡 [dns.go](src/dns.go) — Custom name resolver bypassing default DNS limits on Android.
+* ✂️ [splitter.go](src/splitter.go) — Packet framing logic slicing MTProto packets into WebSocket frames.
+* 🌐 [websocket.go](src/websocket.go) — TLS WebSocket connection initialization with custom headers.
 
 ---
 
