@@ -1,5 +1,7 @@
 <div align="center">
 
+<b>Русский</b> | <a href="README.en.md">English</a>
+
 # 🚀 nzapret by nikitos4683
 
 **DPI-bypass модуль для Android (Magisk / KernelSU)**
