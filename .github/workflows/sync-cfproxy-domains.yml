@@ -1,0 +1,96 @@
+name: sync-cfproxy-domains
+
+# Keeps .github/cfproxy-domains.txt in sync with the upstream Flowseal/tg-ws-proxy
+# list without pointing the runtime fetch (src/cfproxy.go) back at upstream.
+# The file stays self-hosted on nztg; this job only proposes updates via PR so
+# the domain pool the proxy fronts through is always reviewed before it ships.
+
+on:
+  schedule:
+    - cron: '0 7 * * *'    # daily, 07:00 UTC = 10:00 MSK
+  workflow_dispatch:        # allow manual runs
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-cfproxy-domains
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: nztg
+
+      - name: Fetch and parse upstream domain list
+        run: |
+          set -euo pipefail
+          URL="https://raw.githubusercontent.com/Flowseal/tg-ws-proxy/main/.github/cfproxy-domains.txt"
+
+          # Fail loudly instead of overwriting if upstream is gone again.
+          if ! curl -fsSL --retry 3 --max-time 30 "$URL" -o upstream.txt; then
+            echo "::error::Upstream fetch failed ($URL) — leaving the list untouched."
+            exit 1
+          fi
+
+          # Same filter the runtime applies in fetchCFDomains(): drop blank lines
+          # and #-comments, trim, dedupe. Sorted for stable, reviewable diffs.
+          grep -vE '^[[:space:]]*(#|$)' upstream.txt \
+            | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+            | sort -u > domains.txt
+
+          count=$(wc -l < domains.txt | tr -d ' ')
+          echo "Parsed $count domains from upstream."
+          if [ "$count" -lt 5 ]; then
+            echo "::error::Upstream returned only $count domains — refusing to overwrite."
+            exit 1
+          fi
+
+      - name: Rebuild file, preserving our header
+        run: |
+          set -euo pipefail
+          FILE=.github/cfproxy-domains.txt
+          # Keep the leading comment block (our provenance note); replace the body.
+          awk '
+            keep && ($0 ~ /^[[:space:]]*#/ || $0 ~ /^[[:space:]]*$/) { print; next }
+            { keep=0 }
+          ' keep=1 "$FILE" > header.txt
+          cat header.txt domains.txt > "$FILE"
+
+      - name: Open PR if the list changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          FILE=.github/cfproxy-domains.txt
+          if git diff --quiet -- "$FILE"; then
+            echo "No changes — upstream list matches ours."
+            exit 0
+          fi
+
+          BRANCH="chore/sync-cfproxy-domains"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Show what moved, for the PR body.
+          added=$(git diff -- "$FILE"   | grep -E '^\+[a-z0-9]' | sed 's/^+/  + /' || true)
+          removed=$(git diff -- "$FILE" | grep -E '^-[a-z0-9]' | sed 's/^-/  - /' || true)
+
+          git checkout -B "$BRANCH"
+          git add "$FILE"
+          git commit -m "nztg: sync CF fallback domains from upstream"
+          git push -f origin "$BRANCH"
+
+          body=$(printf 'Automated sync of the Cloudflare-fronted fallback domains from\n`Flowseal/tg-ws-proxy` into our self-hosted `.github/cfproxy-domains.txt`.\n\nThe runtime fetch (`src/cfproxy.go`) still reads from the nztg branch — this\nkeeps a human review gate on the pool the proxy fronts through.\n\n**Added:**\n%s\n\n**Removed:**\n%s\n' "${added:-  (none)}" "${removed:-  (none)}")
+
+          if gh pr list --head "$BRANCH" --state open --json number --jq 'length' | grep -q '^0$'; then
+            gh pr create --base nztg --head "$BRANCH" \
+              --title "nztg: sync CF fallback domains from upstream" \
+              --body "$body"
+          else
+            echo "PR already open for $BRANCH — branch updated with latest sync."
+          fi
