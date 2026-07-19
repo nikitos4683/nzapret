@@ -22,6 +22,17 @@ The `nfqws2` binaries, payloads, and routing lists are sourced from the original
 
 ---
 
+## 📌 Table of Contents
+
+- [✨ Key Features](#-key-features)
+- [🚧 Limitations and Known Issues](#-limitations-and-known-issues)
+- [🚀 Quick Start](#-quick-start)
+- [🏗 Architecture and Structure](#-architecture-and-structure)
+- [🛠 Module Compilation](#-module-compilation)
+- [📄 License](#-license)
+
+---
+
 ## ✨ Key Features
 
 - **Built-in WebUI:** A convenient and beautiful graphical interface right inside the KernelSU module manager.
