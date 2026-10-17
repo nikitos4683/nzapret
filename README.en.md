@@ -40,10 +40,12 @@ Just like `nfqws2` serves as the DPI engine for web traffic, `nztg` handles main
 - [x] WSS client (`wss://kws{dc}[-1].web.telegram.org/apiws` via the DC IP).
 - [x] Packet-by-packet MTProto framing into WebSockets (`splitter`).
 - [x] Bidirectional re-encrypting bridge.
-- [x] Direct TCP fallback to Telegram's default DC IPs if WSS is blocked.
+- [x] Direct TCP fallback to Telegram's default DC IPs if WSS is blocked (with exponential backoff for blocked IPs).
 - [x] Cloudflare proxy availability test (`cftest`).
 - [x] Domain balancer (sticky per-DC domain + shuffled pool fallback).
-- [x] DC route pre-resolution (direct-path probing at startup and every 30 min, fallback preselection when blocked).
+- [x] DC WS session pool: ready WSS connections per DC (separately for media), rotated every 2 min, warmed up at startup, backed off when blocked, and suspended after 10 min idle.
+- [x] SNI fronting: if DPI blocks the `*.web.telegram.org` SNI, the pool automatically switches to connecting to the DC IP with a foreign SNI.
+- [x] Fragmented WebSocket message reassembly and oversized-frame protection.
 
 ---
 
@@ -80,7 +82,9 @@ The binary supports several configuration flags and diagnostic subcommands.
 | `--port <n>` | `1443` | The local port to listen on. |
 | `--secret <hex>` | *(Random)* | A 32-character hex-encoded MTProto secret. |
 | `--secret-file <path>`| *(None)* | File path to read from or persist the secret to (useful across restarts). |
-| `--dc-ip <DC:IP>` | *(Default IPs)* | Destination Telegram DC IP rule in `ID:IP` format (repeatable). |
+| `--dc-ip <DC:IP>` | *(Default IPs)* | Destination Telegram DC IP rule in `ID:IP` format (repeatable). An empty value (`--dc-ip ""`) disables all direct connections. |
+| `--pool-size <n>` | `4` | Ready WS sessions kept per DC; `0` disables direct WS. |
+| `--no-preresolve` | `false` | Skip pool warmup at startup (the pool fills on first connection). |
 | `--cfproxy-domain <host>`| *(None)* | Custom Cloudflare-proxied domain for the WS fallback (repeatable). |
 | `--no-cfproxy` | `false` | Disables the Cloudflare proxy fallback. |
 | `--link-file <path>` | *(None)* | Writes the generated `tg://proxy?...` link to this path. |
@@ -122,6 +126,7 @@ The server codebase is organized into modular files:
 * 📡 [dns.go](src/dns.go) — Custom name resolver bypassing default DNS limits on Android.
 * ✂️ [splitter.go](src/splitter.go) — Packet framing logic slicing MTProto packets into WebSocket frames.
 * 🌐 [websocket.go](src/websocket.go) — TLS WebSocket connection initialization with custom headers.
+* 🏊 [pool.go](src/pool.go) — Direct DC WS session pool: warmup, rotation, backoff and SNI fronting.
 
 ---
 

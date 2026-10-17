@@ -29,7 +29,8 @@ type config struct {
 	cfUserDomains []string
 	linkFile      string
 	verbose       bool
-	preResolve    bool
+	preResolve    bool // warm the WS pool up at startup
+	poolSize      int  // ready WS sessions per DC/media key; 0 disables direct WS
 }
 
 var cfg config
@@ -74,11 +75,12 @@ func main() {
 		dcIP       arrayFlags
 		cfDomain   arrayFlags
 		noCF       = flag.Bool("no-cfproxy", false, "disable the Cloudflare proxy fallback")
-		noResolve  = flag.Bool("no-preresolve", false, "disable startup DC route pre-resolution")
+		noResolve  = flag.Bool("no-preresolve", false, "disable startup WS pool warmup (pool fills on first use)")
+		poolSize   = flag.Int("pool-size", 4, "WS connection pool size per DC (0 disables direct WS)")
 		linkFile   = flag.String("link-file", "", "write the tg:// proxy link to this path")
 		verboseF   = flag.Bool("verbose", false, "debug logging")
 	)
-	flag.Var(&dcIP, "dc-ip", "target IP for a DC, e.g. 2:149.154.167.220 (repeatable)")
+	flag.Var(&dcIP, "dc-ip", "target IP for a DC, e.g. 2:149.154.167.220 (repeatable; empty value disables direct connections)")
 	flag.Var(&cfDomain, "cfproxy-domain", "custom Cloudflare-proxied domain for WS fallback (repeatable)")
 	flag.Parse()
 
@@ -92,6 +94,13 @@ func main() {
 
 	if len(dcIP) == 0 {
 		dcIP = arrayFlags{"2:149.154.167.220", "4:149.154.167.220"}
+	} else {
+		for _, v := range dcIP {
+			if strings.TrimSpace(v) == "" {
+				dcIP = nil // --dc-ip "" disables all direct DC connections
+				break
+			}
+		}
 	}
 	dcRedirects, err := parseDCIPList(dcIP)
 	if err != nil {
@@ -108,6 +117,10 @@ func main() {
 		linkFile:      *linkFile,
 		verbose:       verbose,
 		preResolve:    !*noResolve,
+		poolSize:      *poolSize,
+	}
+	if cfg.poolSize < 0 {
+		cfg.poolSize = 0
 	}
 
 	link := ddLink(cfg.host, cfg.port, cfg.secret)
@@ -142,6 +155,10 @@ func serve() error {
 	for _, dc := range dcs {
 		logInfo("    DC%d: %s", dc, cfg.dcRedirects[dc])
 	}
+	if len(dcs) == 0 {
+		logInfo("    (none - direct connections disabled)")
+	}
+	logInfo("  WS pool size:  %d", cfg.poolSize)
 	logInfo("  Connect: %s", ddLink(cfg.host, cfg.port, cfg.secret))
 	logInfo("============================================================")
 
@@ -150,7 +167,7 @@ func serve() error {
 	}
 
 	if cfg.preResolve {
-		go routeResolverLoop()
+		pool.warmup()
 	}
 
 	for {
@@ -199,43 +216,22 @@ func handleClient(client net.Conn) {
 	relayInit := generateRelayInit(protoTag, dcIdx)
 	ctx := buildCryptoCtx(prekeyIV, cfg.secret, relayInit)
 
-	target, inConfig := cfg.dcRedirects[dc]
 	sp := newSplitter(relayInit, protoInt)
 
-	// Skip the direct-to-Telegram-IP path when the DC has no configured IP, or
-	// when that IP recently timed out (network-level block) — go straight to CF.
-	skipDirect := !inConfig || ipFailActive(target)
-
-	if !skipDirect {
-		var ws *rawWebSocket
-		for _, domain := range wsDomains(dc, isMedia) {
-			logDebug("[%s] DC%d%s -> wss://%s/apiws via %s", label, dc, mediaTag, domain, target)
-			w, err := wsConnect(target, domain, "", "/apiws", 5*time.Second)
-			if err != nil {
-				if he, isHE := err.(*wsHandshakeError); isHE && he.isRedirect() {
-					logDebug("[%s] DC%d%s got %d from %s -> %s", label, dc, mediaTag, he.statusCode, domain, he.location)
-					continue
-				}
-				logDebug("[%s] DC%d%s WS connect failed: %v", label, dc, mediaTag, err)
-				continue
-			}
-			ws = w
-			break
-		}
-		if ws != nil {
-			clearIPFail(target)
-			if err := ws.send(relayInit); err != nil {
-				logDebug("[%s] DC%d%s failed to send relay init: %v", label, dc, mediaTag, err)
-				ws.close()
-				return
-			}
-			logRoute(dc, "direct WS")
-			bridgeWSReencrypt(client, ws, ctx, sp, label)
+	// Direct path: a ready WS from the pool (or one quick attempt on a cold
+	// key). nil means the DC has no configured IP, the pool is disabled, or
+	// the direct path is currently failing — go straight to the fallbacks.
+	if ws := pool.get(dc, isMedia); ws != nil {
+		if err := ws.send(relayInit); err != nil {
+			logDebug("[%s] DC%d%s failed to send relay init: %v", label, dc, mediaTag, err)
+			ws.close()
 			return
 		}
-		markIPFail(target)
-		logDebug("[%s] DC%d%s direct WS unavailable -> CF fallback", label, dc, mediaTag)
+		logRoute(dc, "direct WS")
+		bridgeWSReencrypt(client, ws, ctx, sp, label)
+		return
 	}
+	logDebug("[%s] DC%d%s direct WS unavailable -> fallback", label, dc, mediaTag)
 
 	if cfg.fallbackCF && tryCFFallback(client, relayInit, ctx, sp, dc, label) {
 		return
@@ -263,43 +259,6 @@ func logRoute(dc int, desc string) {
 	if changed {
 		logInfo("DC%d route: %s", dc, desc)
 	}
-}
-
-// IP-fail cooldown: once a DC's direct IP times out we stop retrying it for a
-// while and route straight through the CF fallback.
-const ipFailCooldown = time.Hour
-
-var (
-	failMu      sync.Mutex
-	ipFailUntil = map[string]time.Time{}
-)
-
-func ipFailActive(target string) bool {
-	if target == "" {
-		return false
-	}
-	failMu.Lock()
-	defer failMu.Unlock()
-	t, ok := ipFailUntil[target]
-	return ok && time.Now().Before(t)
-}
-
-func markIPFail(target string) {
-	if target == "" {
-		return
-	}
-	failMu.Lock()
-	defer failMu.Unlock()
-	ipFailUntil[target] = time.Now().Add(ipFailCooldown)
-}
-
-func clearIPFail(target string) {
-	if target == "" {
-		return
-	}
-	failMu.Lock()
-	defer failMu.Unlock()
-	delete(ipFailUntil, target)
 }
 
 func drain(client net.Conn) {

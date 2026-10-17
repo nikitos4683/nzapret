@@ -35,11 +35,15 @@ func (e *wsHandshakeError) isRedirect() bool {
 }
 
 const (
+	opCont   = 0x0
 	opBinary = 0x2
 	opClose  = 0x8
 	opPing   = 0x9
 	opPong   = 0xA
 )
+
+// maxWSMessageLen caps a single frame and a reassembled fragmented message.
+const maxWSMessageLen = 16 * 1024 * 1024
 
 // rawWebSocket is a minimal RFC6455 client speaking only what the Telegram WS
 // bridge needs: masked binary frames out, binary frames in, ping/pong/close
@@ -48,6 +52,7 @@ type rawWebSocket struct {
 	conn   net.Conn
 	r      *bufio.Reader
 	closed bool
+	frag   []byte // pending fragments of a message split across frames
 }
 
 // wsConnect dials host:443 over TLS (SNI=sni, cert verification disabled — the
@@ -221,7 +226,7 @@ func (ws *rawWebSocket) sendBatch(parts [][]byte) error {
 // recv returns the next binary payload, or nil on close.
 func (ws *rawWebSocket) recv() ([]byte, error) {
 	for !ws.closed {
-		opcode, payload, err := ws.readFrame()
+		opcode, payload, fin, err := ws.readFrame()
 		if err != nil {
 			return nil, err
 		}
@@ -239,8 +244,20 @@ func (ws *rawWebSocket) recv() ([]byte, error) {
 			continue
 		case opPong:
 			continue
-		case 0x1, 0x2:
-			return payload, nil
+		case opCont, 0x1, opBinary:
+			if fin && len(ws.frag) == 0 {
+				return payload, nil
+			}
+			ws.frag = append(ws.frag, payload...)
+			if len(ws.frag) > maxWSMessageLen {
+				return nil, fmt.Errorf("WS message too large: %d bytes", len(ws.frag))
+			}
+			if !fin {
+				continue
+			}
+			msg := ws.frag
+			ws.frag = nil
+			return msg, nil
 		default:
 			continue
 		}
@@ -248,25 +265,33 @@ func (ws *rawWebSocket) recv() ([]byte, error) {
 	return nil, nil
 }
 
-func (ws *rawWebSocket) readFrame() (byte, []byte, error) {
+func (ws *rawWebSocket) readFrame() (opcode byte, payload []byte, fin bool, err error) {
 	hdr := make([]byte, 2)
 	if _, err := io.ReadFull(ws.r, hdr); err != nil {
-		return 0, nil, err
+		return 0, nil, false, err
 	}
-	opcode := hdr[0] & 0x0F
+	fin = hdr[0]&0x80 != 0
+	opcode = hdr[0] & 0x0F
 	length := int(hdr[1] & 0x7F)
 	if length == 126 {
 		ext := make([]byte, 2)
 		if _, err := io.ReadFull(ws.r, ext); err != nil {
-			return 0, nil, err
+			return 0, nil, false, err
 		}
 		length = int(binary.BigEndian.Uint16(ext))
 	} else if length == 127 {
 		ext := make([]byte, 8)
 		if _, err := io.ReadFull(ws.r, ext); err != nil {
-			return 0, nil, err
+			return 0, nil, false, err
 		}
-		length = int(binary.BigEndian.Uint64(ext))
+		n := binary.BigEndian.Uint64(ext)
+		if n > maxWSMessageLen {
+			return 0, nil, false, fmt.Errorf("WS frame too large: %d bytes", n)
+		}
+		length = int(n)
+	}
+	if length > maxWSMessageLen {
+		return 0, nil, false, fmt.Errorf("WS frame too large: %d bytes", length)
 	}
 
 	masked := hdr[1]&0x80 != 0
@@ -274,17 +299,17 @@ func (ws *rawWebSocket) readFrame() (byte, []byte, error) {
 	if masked {
 		maskKey = make([]byte, 4)
 		if _, err := io.ReadFull(ws.r, maskKey); err != nil {
-			return 0, nil, err
+			return 0, nil, false, err
 		}
 	}
-	payload := make([]byte, length)
+	payload = make([]byte, length)
 	if _, err := io.ReadFull(ws.r, payload); err != nil {
-		return 0, nil, err
+		return 0, nil, false, err
 	}
 	if masked {
 		payload = xorMask(payload, maskKey)
 	}
-	return opcode, payload, nil
+	return opcode, payload, fin, nil
 }
 
 func (ws *rawWebSocket) close() {

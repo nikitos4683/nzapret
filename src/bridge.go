@@ -19,8 +19,8 @@ var dcDefaultIPs = map[int]string{
 	203: "91.105.192.100",
 }
 
-// wsDomains returns the candidate Telegram WS hostnames for a DC, ordered by
-// preference for the media/non-media case. Mirrors ws_domains().
+// wsDomains returns the candidate Telegram WS hostnames for a DC. Media
+// prefers the -1 host; non-media only uses the main one. Mirrors ws_domains().
 func wsDomains(dc int, isMedia bool) []string {
 	if dc == 203 {
 		dc = 2
@@ -31,10 +31,59 @@ func wsDomains(dc int, isMedia bool) []string {
 			fmt.Sprintf("kws%d.web.telegram.org", dc),
 		}
 	}
-	return []string{
-		fmt.Sprintf("kws%d.web.telegram.org", dc),
-		fmt.Sprintf("kws%d-1.web.telegram.org", dc),
+	return []string{fmt.Sprintf("kws%d.web.telegram.org", dc)}
+}
+
+// TCP fallback backoff: after a failed dial the destination is skipped for an
+// exponentially growing interval, and only one dial per destination runs at a
+// time, so a blocked IP isn't hammered by every new client connection.
+// Mirrors _tcp_fallback's backoff in bridge.py.
+const (
+	tcpBackoffInitial = 30 * time.Second
+	tcpBackoffMax     = time.Hour
+)
+
+var (
+	tcpMu         sync.Mutex
+	tcpFailures   = map[string]int{}
+	tcpRetryAfter = map[string]time.Time{}
+	tcpConnecting = map[string]bool{}
+)
+
+// tcpDialBegin reports whether a dial to dst may start now and, if so, marks
+// it as in progress.
+func tcpDialBegin(dst string) bool {
+	tcpMu.Lock()
+	defer tcpMu.Unlock()
+	if tcpConnecting[dst] || time.Now().Before(tcpRetryAfter[dst]) {
+		return false
 	}
+	tcpConnecting[dst] = true
+	return true
+}
+
+// tcpDialEnd records the dial outcome and returns the backoff applied (0 on success).
+func tcpDialEnd(dst string, ok bool) time.Duration {
+	tcpMu.Lock()
+	defer tcpMu.Unlock()
+	delete(tcpConnecting, dst)
+	if ok {
+		delete(tcpFailures, dst)
+		delete(tcpRetryAfter, dst)
+		return 0
+	}
+	f := tcpFailures[dst] + 1
+	tcpFailures[dst] = f
+	shift := f - 1
+	if shift > 7 {
+		shift = 7
+	}
+	delay := tcpBackoffInitial << uint(shift)
+	if delay > tcpBackoffMax {
+		delay = tcpBackoffMax
+	}
+	tcpRetryAfter[dst] = time.Now().Add(delay)
+	return delay
 }
 
 // bridgeWSReencrypt runs the bidirectional client<->WS bridge, re-encrypting in
@@ -117,19 +166,25 @@ func tcpFallback(client net.Conn, relayInit []byte, ctx *cryptoCtx, dc int, labe
 	if !ok {
 		return false
 	}
+	if !tcpDialBegin(dst) {
+		logDebug("[%s] TCP fallback to %s:443 skipped (backoff or connecting)", label, dst)
+		return false
+	}
 	remote, err := net.DialTimeout("tcp", net.JoinHostPort(dst, "443"), 10*time.Second)
+	if err == nil {
+		if tc, ok := remote.(*net.TCPConn); ok {
+			_ = tc.SetNoDelay(true)
+		}
+		if _, err = remote.Write(relayInit); err != nil {
+			remote.Close()
+		}
+	}
 	if err != nil {
-		logDebug("[%s] TCP fallback to %s:443 failed: %v", label, dst, err)
+		delay := tcpDialEnd(dst, false)
+		logDebug("[%s] TCP fallback to %s:443 failed: %v; retry in %s", label, dst, err, delay)
 		return false
 	}
-	if tc, ok := remote.(*net.TCPConn); ok {
-		_ = tc.SetNoDelay(true)
-	}
-
-	if _, err := remote.Write(relayInit); err != nil {
-		remote.Close()
-		return false
-	}
+	tcpDialEnd(dst, true)
 	logRoute(dc, "direct TCP ("+dst+")")
 
 	var once sync.Once
