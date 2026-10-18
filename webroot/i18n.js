@@ -16,13 +16,11 @@ const translations = {
         },
         common: {
             save: 'Сохранить',
-            save_restart: 'Сохранить и перезапустить',
             reload: 'Обновить',
             add: 'Добавить',
             clear: 'Очистить',
             end: 'Вниз',
             live: 'LIVE',
-            loading: 'Загрузка...',
             applying_changes: 'Применение изменений...',
             unknown: 'неизвестно',
             remove_domain: 'Удалить домен'
@@ -34,7 +32,6 @@ const translations = {
             multi_pid: 'Несколько PID',
             error: 'Ошибка статуса',
             refresh_failed: 'Не удалось обновить статус',
-            on: 'Вкл',
             off: 'Выкл',
             tg_port: 'Порт {{port}}',
             tg_port_cf: 'Порт {{port}} (CF)',
@@ -174,31 +171,49 @@ const translations = {
                 routing_ipv6: 'Маршрутизация IPv6'
             },
             details: {
-                command_available: 'команда доступна',
-                command_missing: 'команда отсутствует',
-                ip6tables_available: 'команда доступна',
-                ip6tables_unusable: 'присутствует, но не работает',
-                ip6tables_missing_fallback: 'команда отсутствует, фаервол только для IPv4',
-                runtime_file_present: 'файл присутствует',
-                runtime_file_missing: 'файл отсутствует',
-                process_running: 'запущен (pid: {{pid}})',
-                process_not_running: 'не запущен',
-                userlist_attached: 'текущая конфигурация использует list-user.txt',
-                userlist_detached: 'текущая конфигурация не ссылается на list-user.txt',
-                stack_ipv4_only: 'Только IPv4',
-                stack_dual: 'IPv4 + IPv6',
-                private_dns_unavailable: 'команда settings отсутствует',
-                private_dns_off: 'Выкл',
-                private_dns_auto: 'Авто',
-                private_dns_hostname_default: 'провайдер по умолчанию ({{hostname}})',
-                private_dns_hostname_custom: 'пользовательский провайдер ({{hostname}})',
-                private_dns_hostname_unspecified: 'адрес провайдера',
-                jump_present: 'переход присутствует',
-                jump_missing: 'переход отсутствует',
-                jump_skipped_no_ipv6: 'пропущено (фаервол только для IPv4)',
-                routing_ok: 'маршрут доступен',
-                routing_fail: 'проверка маршрута завершилась с ошибкой',
-                routing_unavailable: 'недоступно в этой сети'
+                command: {
+                    available: 'команда доступна',
+                    missing: 'команда отсутствует'
+                },
+                ip6tables_runtime: {
+                    available: 'команда доступна',
+                    unusable: 'присутствует, но не работает',
+                    missing_fallback: 'команда отсутствует, фаервол только для IPv4'
+                },
+                runtime_file: {
+                    present: 'файл присутствует',
+                    missing: 'файл отсутствует'
+                },
+                process: {
+                    running: 'запущен (pid: {{pid}})',
+                    not_running: 'не запущен'
+                },
+                userlist_binding: {
+                    attached: 'текущая конфигурация использует list-user.txt',
+                    detached: 'текущая конфигурация не ссылается на list-user.txt'
+                },
+                ip_stack: {
+                    ipv4_only: 'Только IPv4',
+                    dual_stack: 'IPv4 + IPv6'
+                },
+                private_dns: {
+                    unavailable: 'команда settings отсутствует',
+                    off: 'Выкл',
+                    auto: 'Авто',
+                    hostname_default: 'провайдер по умолчанию ({{hostname}})',
+                    hostname_custom: 'пользовательский провайдер ({{hostname}})',
+                    hostname_unspecified: 'адрес провайдера'
+                },
+                jump_rule: {
+                    present: 'переход присутствует',
+                    missing: 'переход отсутствует',
+                    skipped_no_ipv6: 'пропущено (фаервол только для IPv4)'
+                },
+                routing: {
+                    ok: 'маршрут доступен',
+                    fail: 'проверка маршрута завершилась с ошибкой',
+                    unavailable: 'недоступно в этой сети'
+                }
             }
         },
         logs: {
@@ -259,13 +274,11 @@ const translations = {
         },
         common: {
             save: 'Save',
-            save_restart: 'Save & Restart',
             reload: 'Reload',
             add: 'Add',
             clear: 'Clear',
             end: 'End',
             live: 'LIVE',
-            loading: 'Loading...',
             applying_changes: 'Applying changes...',
             unknown: 'unknown',
             remove_domain: 'Remove domain'
@@ -277,7 +290,6 @@ const translations = {
             multi_pid: 'Multi-PID',
             error: 'Status Error',
             refresh_failed: 'Status refresh failed',
-            on: 'On',
             off: 'Off',
             tg_port: 'Port {{port}}',
             tg_port_cf: 'Port {{port}} (CF)',
@@ -417,31 +429,49 @@ const translations = {
                 routing_ipv6: 'IPv6 routing'
             },
             details: {
-                command_available: 'command available',
-                command_missing: 'command missing',
-                ip6tables_available: 'command available',
-                ip6tables_unusable: 'present but unusable',
-                ip6tables_missing_fallback: 'missing, IPv4-only firewall',
-                runtime_file_present: 'file present',
-                runtime_file_missing: 'file missing',
-                process_running: 'running (pid: {{pid}})',
-                process_not_running: 'not running',
-                userlist_attached: 'current configuration includes list-user.txt',
-                userlist_detached: 'current configuration does not reference list-user.txt',
-                stack_ipv4_only: 'IPv4 only',
-                stack_dual: 'IPv4 + IPv6',
-                private_dns_unavailable: 'settings command missing',
-                private_dns_off: 'Off',
-                private_dns_auto: 'Automatic',
-                private_dns_hostname_default: 'Provider hostname ({{hostname}})',
-                private_dns_hostname_custom: 'Provider hostname ({{hostname}})',
-                private_dns_hostname_unspecified: 'Provider hostname',
-                jump_present: 'jump present',
-                jump_missing: 'jump missing',
-                jump_skipped_no_ipv6: 'skipped (IPv4-only firewall)',
-                routing_ok: 'route lookup works',
-                routing_fail: 'route lookup failed',
-                routing_unavailable: 'not available on this network'
+                command: {
+                    available: 'command available',
+                    missing: 'command missing'
+                },
+                ip6tables_runtime: {
+                    available: 'command available',
+                    unusable: 'present but unusable',
+                    missing_fallback: 'missing, IPv4-only firewall'
+                },
+                runtime_file: {
+                    present: 'file present',
+                    missing: 'file missing'
+                },
+                process: {
+                    running: 'running (pid: {{pid}})',
+                    not_running: 'not running'
+                },
+                userlist_binding: {
+                    attached: 'current configuration includes list-user.txt',
+                    detached: 'current configuration does not reference list-user.txt'
+                },
+                ip_stack: {
+                    ipv4_only: 'IPv4 only',
+                    dual_stack: 'IPv4 + IPv6'
+                },
+                private_dns: {
+                    unavailable: 'settings command missing',
+                    off: 'Off',
+                    auto: 'Automatic',
+                    hostname_default: 'Provider hostname ({{hostname}})',
+                    hostname_custom: 'Provider hostname ({{hostname}})',
+                    hostname_unspecified: 'Provider hostname'
+                },
+                jump_rule: {
+                    present: 'jump present',
+                    missing: 'jump missing',
+                    skipped_no_ipv6: 'skipped (IPv4-only firewall)'
+                },
+                routing: {
+                    ok: 'route lookup works',
+                    fail: 'route lookup failed',
+                    unavailable: 'not available on this network'
+                }
             }
         },
         logs: {
@@ -485,78 +515,60 @@ const translations = {
 };
 
 let currentLocale = DEFAULT_LOCALE;
+// Intl objects are comparatively expensive; build them once per locale.
+let numberFormat = null;
+let pluralRules = null;
 
-function resolveLocale(locale) {
-    return SUPPORTED_LOCALES.includes(locale) ? locale : DEFAULT_LOCALE;
+function applyLocale(locale) {
+    currentLocale = SUPPORTED_LOCALES.includes(locale) ? locale : DEFAULT_LOCALE;
+    numberFormat = new Intl.NumberFormat(currentLocale);
+    pluralRules = new Intl.PluralRules(currentLocale);
+    document.documentElement.lang = currentLocale;
+    return currentLocale;
 }
 
 function getValue(locale, key) {
-    return key.split('.').reduce((acc, part) => {
-        if (acc && typeof acc === 'object' && part in acc) {
-            return acc[part];
-        }
-        return undefined;
-    }, translations[locale]);
+    return key.split('.').reduce(
+        (acc, part) => (acc && typeof acc === 'object' && part in acc ? acc[part] : undefined),
+        translations[locale]
+    );
+}
+
+function messageFor(key) {
+    return getValue(currentLocale, key) ?? getValue(FALLBACK_LOCALE, key);
 }
 
 function interpolate(template, params = {}) {
-    return String(template).replace(/\{\{(\w+)\}\}/g, (_, key) => {
-        if (Object.prototype.hasOwnProperty.call(params, key)) {
-            return String(params[key]);
-        }
-        return '';
-    });
-}
-
-function getPluralRules(locale) {
-    return new Intl.PluralRules(locale);
-}
-
-function getStoredLocale() {
-    try {
-        return localStorage.getItem(LOCALE_STORAGE_KEY) || '';
-    } catch (error) {
-        return '';
-    }
-}
-
-function setStoredLocale(locale) {
-    try {
-        localStorage.setItem(LOCALE_STORAGE_KEY, locale);
-    } catch (error) {
-        // Ignore storage errors in restrictive WebViews.
-    }
-}
-
-function messageForLocale(locale, key) {
-    return getValue(locale, key) ?? getValue(FALLBACK_LOCALE, key);
+    return String(template).replace(/\{\{(\w+)\}\}/g, (_, key) => (
+        Object.prototype.hasOwnProperty.call(params, key) ? String(params[key]) : ''
+    ));
 }
 
 function formatNumber(value) {
     const number = Number(value);
-    const safeNumber = Number.isFinite(number) ? number : 0;
-    return new Intl.NumberFormat(currentLocale).format(safeNumber);
+    return numberFormat.format(Number.isFinite(number) ? number : 0);
+}
+
+// Whether `key` resolves to a plain message (not a missing key or a group).
+function hasMessage(key) {
+    return typeof messageFor(key) === 'string';
 }
 
 function t(key, params = {}) {
-    const value = messageForLocale(currentLocale, key);
+    const value = messageFor(key);
     if (typeof value === 'undefined') {
         return key;
     }
-    if (typeof value === 'object') {
-        return interpolate(value.other ?? key, params);
-    }
-    return interpolate(value, params);
+    return interpolate(typeof value === 'object' ? (value.other ?? key) : value, params);
 }
 
 function tc(key, count, params = {}) {
-    const value = messageForLocale(currentLocale, key);
+    const value = messageFor(key);
     if (!value || typeof value !== 'object') {
         return t(key, params);
     }
 
-    const rule = getPluralRules(currentLocale).select(Number(count));
-    const template = value[rule] ?? value.other ?? Object.values(value)[0] ?? key;
+    const template = value[pluralRules.select(Number(count))] ?? value.other ?? key;
     return interpolate(template, {
         count: formatNumber(count),
         raw_count: String(count),
@@ -589,15 +601,22 @@ function applyStaticTranslations(root = document, params = {}) {
 }
 
 function initializeLocale() {
-    currentLocale = resolveLocale(getStoredLocale() || DEFAULT_LOCALE);
-    document.documentElement.lang = currentLocale;
-    return currentLocale;
+    let stored = '';
+    try {
+        stored = localStorage.getItem(LOCALE_STORAGE_KEY) || '';
+    } catch (error) {
+        // Restrictive WebViews may block storage; fall back to the default.
+    }
+    return applyLocale(stored || DEFAULT_LOCALE);
 }
 
 function setLocale(locale) {
-    currentLocale = resolveLocale(locale);
-    setStoredLocale(currentLocale);
-    document.documentElement.lang = currentLocale;
+    applyLocale(locale);
+    try {
+        localStorage.setItem(LOCALE_STORAGE_KEY, currentLocale);
+    } catch (error) {
+        // Ignore storage errors in restrictive WebViews.
+    }
     return currentLocale;
 }
 
@@ -606,12 +625,10 @@ function getLocale() {
 }
 
 export {
-    DEFAULT_LOCALE,
-    LOCALE_STORAGE_KEY,
-    SUPPORTED_LOCALES,
     applyStaticTranslations,
     formatNumber,
     getLocale,
+    hasMessage,
     initializeLocale,
     setLocale,
     t,

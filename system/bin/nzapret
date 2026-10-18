@@ -1,63 +1,127 @@
 #!/system/bin/sh
 # nzapret — CLI management utility
 # Installed to /system/bin/ via Magisk overlay.
-# Provides commands for controlling nfqws2 service, updating lists,
-# managing profiles and diagnostics.
+# Controls nfqws2 and nztg, hostlists, profiles, Private DNS, the Telegram
+# proxy and diagnostics, with JSON output for the WebUI.
 
 MODDIR="/data/adb/modules/nzapret"
-LISTS="$MODDIR/lists"
-USER_LIST_FILE="$LISTS/list-user.txt"
-GENERAL_LIST_FILE="$LISTS/list-general.txt"
-GOOGLE_LIST_FILE="$LISTS/list-google.txt"
-PAYLOADS="$MODDIR/payloads"
-LUA_DIR="$MODDIR/lua"
-PAYLOAD_QUIC_FILE="$PAYLOADS/quic_initial_www_google_com.bin"
-PAYLOAD_TLS_FILE="$PAYLOADS/tls_clienthello_www_google_com.bin"
-BIN="$MODDIR/bin/nfqws2"
-NZTG_BIN="$MODDIR/bin/nztg"
-TGPROXY_CONF="$MODDIR/tgproxy.conf"
-TG_SECRET_FILE="$MODDIR/.tg_secret"
-TG_LINK_FILE="$MODDIR/.tg_link"
-TG_LOGFILE="$MODDIR/nztg.log"
-TG_PROCESS_NAME="nztg"
-CHAIN="nzapret_out"
-LOGFILE="$MODDIR/nzapret.log"
-EVENTLOG="$MODDIR/nzapret-events.log"
-PROFILE_DIR="$MODDIR/profiles"
-ACTIVE_PROFILE_FILE="$PROFILE_DIR/profile.current"
-PRIVATE_DNS_INIT_FILE="$MODDIR/.private_dns_initialized"
-DEFAULT_PROFILE="default"
-PROCESS_NAME="nfqws2"
 LIST_COUNT_CACHE="$MODDIR/.list_count"
 DIAGNOSE_COMMANDS="iptables pgrep tail curl ip settings"
 DEFAULT_LIST_SOURCE="https://raw.githubusercontent.com/bol-van/rulist/refs/heads/main/reestr_hostname.txt"
-DEFAULT_PRIVATE_DNS_HOSTNAME="xbox-dns.ru"
 
-# Shared helpers (logging, IPv6 detection, Private DNS, settings I/O).
+# Shared constants and helpers (logging, firewall, profiles, Private DNS).
 . "$MODDIR/common.sh"
 
-# Helpers
-ensure_runtime_layout() {
-    mkdir -p "$PROFILE_DIR" >/dev/null 2>&1
-    mkdir -p "$LISTS" >/dev/null 2>&1
-    [ -f "$USER_LIST_FILE" ] || : > "$USER_LIST_FILE" 2>/dev/null
+# --- Helpers ---
+die() {
+    echo "$*"
+    exit 1
 }
 
 require_cmd() {
-    has_cmd "$1" || {
-        echo "[-] Missing command: $1"
-        exit 1
-    }
+    has_cmd "$1" || die "[-] Missing command: $1"
 }
 
-# The IPv6 firewall is brought up whenever ip6tables can manage mangle rules.
-# There is no mode to configure: idle IPv6 rules are free when there is no IPv6
-# traffic and already protect IPv6 that appears after boot or a network switch.
+ensure_runtime_layout() {
+    mkdir -p "$PROFILE_DIR" "$LISTS" >/dev/null 2>&1
+    [ -f "$USER_LIST_FILE" ] || : > "$USER_LIST_FILE" 2>/dev/null
+}
+
+make_temp_file() {
+    _tmp=$(mktemp 2>/dev/null)
+    if [ -z "$_tmp" ]; then
+        _tmp="/data/local/tmp/nzapret.$$.tmp"
+        : > "$_tmp" 2>/dev/null || return 1
+    fi
+    echo "$_tmp"
+}
+
+get_version() {
+    grep '^version=' "$MODDIR/module.prop" 2>/dev/null | cut -d= -f2 | tr -d '\r\n'
+}
+
+# parse_switch <value>: prints 1/0 for on/off style values.
+parse_switch() {
+    case "$1" in
+        on|1|true|enabled) echo 1 ;;
+        off|0|false|disabled) echo 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# --- JSON ---
+json_escape() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+# bool <command...>: prints true/false for the command's exit status.
+bool() {
+    if "$@"; then echo true; else echo false; fi
+}
+
+# --- Processes ---
+is_live_pid() {
+    [ -d "/proc/$1" ] || return 1
+    [ "$(awk '/^State:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null)" != "Z" ]
+}
+
+# list_live_pids <name>: non-zombie PIDs of a process name.
+list_live_pids() {
+    for _pid in $(pgrep -x "$1" 2>/dev/null); do
+        if is_live_pid "$_pid"; then
+            echo "$_pid"
+        fi
+    done
+}
+
+# Sets PID/PID_COUNT for nfqws2 and TG_PID/TG_PID_COUNT for nztg.
+load_process_state() {
+    set -- $(list_live_pids "$PROCESS_NAME")
+    PID="${1:-}"
+    PID_COUNT=$#
+    set -- $(list_live_pids "$TG_PROCESS_NAME")
+    TG_PID="${1:-}"
+    TG_PID_COUNT=$#
+}
+
+is_running() {
+    [ -n "$(list_live_pids "$PROCESS_NAME")" ]
+}
+
+# wait_for_exit <name> [tries]: poll in 100 ms steps until the process is gone.
+wait_for_exit() {
+    _tries="${2:-15}"
+    while [ -n "$(list_live_pids "$1")" ]; do
+        [ "$_tries" -gt 0 ] || return 1
+        sleep 0.1 2>/dev/null || sleep 1
+        _tries=$((_tries - 1))
+    done
+}
+
+# print_process_line <name> <pid> <count>
+print_process_line() {
+    if [ -n "$2" ]; then
+        echo "$1: [ON] (PID: $2)"
+        [ "$3" -gt 1 ] && echo "warning: multiple $1 processes detected ($3)"
+    else
+        echo "$1: [OFF]"
+    fi
+    return 0
+}
+
+# --- Firewall ---
+# The IPv6 firewall is up whenever ip6tables can manage mangle rules (mirrors
+# resolve_firewall_stack in service.sh). There is no mode to configure: idle
+# IPv6 rules are free and already protect IPv6 that appears after boot or a
+# network switch. The probe result is memoized in IPV6_FW.
 ipv6_firewall_enabled() {
-    ip6tables_supported
+    if [ -z "$IPV6_FW" ]; then
+        if ip6tables_supported; then IPV6_FW=1; else IPV6_FW=0; fi
+    fi
+    [ "$IPV6_FW" = "1" ]
 }
 
-get_firewall_stack_label() {
+firewall_stack_label() {
     if ipv6_firewall_enabled; then
         echo "IPv4 + IPv6"
     else
@@ -65,23 +129,46 @@ get_firewall_stack_label() {
     fi
 }
 
-get_firewall_stack_code() {
-    if ipv6_firewall_enabled; then
-        echo "dual_stack"
-    else
-        echo "ipv4_only"
+get_rule_count() {
+    "$1" -w -t mangle -L "$CHAIN" -n 2>/dev/null | grep -c NFQUEUE
+}
+
+has_jump_rules() {
+    for _jt in iptables ip6tables; do
+        for _jh in OUTPUT FORWARD; do
+            check_jump_rule "$_jt" "$_jh" && return 0
+        done
+    done
+    return 1
+}
+
+# --- Private DNS ---
+# Sets PDNS_MODE, PDNS_HOST and PDNS_CODE (unavailable | off | auto |
+# hostname_default | hostname_custom | hostname_unspecified) with a single
+# round of `settings` reads.
+load_private_dns_state() {
+    PDNS_MODE=$(get_private_dns_mode)
+    PDNS_HOST=$(get_private_dns_hostname)
+    if ! has_cmd settings; then
+        PDNS_CODE="unavailable"
+        return
     fi
+    case "$PDNS_MODE" in
+        "off") PDNS_CODE="off" ;;
+        "hostname")
+            if [ -z "$PDNS_HOST" ]; then
+                PDNS_CODE="hostname_unspecified"
+            elif [ "$PDNS_HOST" = "$DEFAULT_PRIVATE_DNS_HOSTNAME" ]; then
+                PDNS_CODE="hostname_default"
+            else
+                PDNS_CODE="hostname_custom"
+            fi
+            ;;
+        *) PDNS_CODE="auto" ;;
+    esac
 }
 
-private_dns_available() {
-    has_cmd settings
-}
-
-private_dns_initialized() {
-    [ -f "$PRIVATE_DNS_INIT_FILE" ]
-}
-
-get_private_dns_mode_label() {
+private_dns_mode_label() {
     case "$1" in
         "off") echo "Off" ;;
         "hostname") echo "Provider hostname" ;;
@@ -89,290 +176,73 @@ get_private_dns_mode_label() {
     esac
 }
 
-get_private_dns_display_label() {
-    if ! private_dns_available; then
-        echo "Unavailable"
-        return
-    fi
-
-    _mode=$(get_private_dns_mode)
-    _host=$(get_private_dns_hostname)
-    case "$_mode" in
-        "off") echo "Off" ;;
-        "hostname")
-            if [ -n "$_host" ]; then
-                echo "$_host"
-            else
-                echo "Provider hostname"
-            fi
-            ;;
-        *) echo "Automatic" ;;
+# Short label (status JSON): the provider hostname itself when one is set.
+private_dns_label() {
+    case "$PDNS_CODE" in
+        unavailable) echo "Unavailable" ;;
+        hostname_default|hostname_custom) echo "$PDNS_HOST" ;;
+        *) private_dns_mode_label "$PDNS_MODE" ;;
     esac
 }
 
-get_private_dns_status_summary() {
-    if ! private_dns_available; then
-        echo "Unavailable (settings command missing)"
-        return
-    fi
-
-    _mode=$(get_private_dns_mode)
-    _host=$(get_private_dns_hostname)
-    case "$_mode" in
-        "off")
-            echo "Off"
-            ;;
-        "hostname")
-            if [ -n "$_host" ]; then
-                echo "Provider hostname ($_host)"
-            else
-                echo "Provider hostname"
-            fi
-            ;;
-        *)
-            echo "Automatic"
-            ;;
+# Human-readable summary (status / diagnose).
+private_dns_summary() {
+    case "$PDNS_CODE" in
+        unavailable) echo "Unavailable (settings command missing)" ;;
+        hostname_default|hostname_custom) echo "Provider hostname ($PDNS_HOST)" ;;
+        *) private_dns_mode_label "$PDNS_MODE" ;;
     esac
 }
 
-get_private_dns_status_code() {
-    if ! private_dns_available; then
-        echo "unavailable"
-        return
-    fi
-
-    _mode=$(get_private_dns_mode)
-    _host=$(get_private_dns_hostname)
-    case "$_mode" in
-        "off")
-            echo "off"
-            ;;
-        "hostname")
-            if [ -n "$_host" ]; then
-                if [ "$_host" = "$DEFAULT_PRIVATE_DNS_HOSTNAME" ]; then
-                    echo "hostname_default"
-                else
-                    echo "hostname_custom"
-                fi
-            else
-                echo "hostname_unspecified"
-            fi
-            ;;
-        *)
-            echo "auto"
-            ;;
-    esac
-}
-
-set_private_dns_mode_off() {
-    private_dns_available || return 1
-    put_global_setting private_dns_mode off || return 1
-    mark_private_dns_initialized
-}
-
-set_private_dns_mode_auto() {
-    private_dns_available || return 1
-    put_global_setting private_dns_mode opportunistic || return 1
-    mark_private_dns_initialized
-}
-
-set_private_dns_mode_hostname() {
-    private_dns_available || return 1
-    _host=$(normalize_private_dns_hostname "$1")
-    is_valid_private_dns_hostname "$_host" || return 1
-    put_global_setting private_dns_specifier "$_host" || return 1
-    _mode=$(get_private_dns_mode)
-    if [ "$_mode" != "hostname" ]; then
-        put_global_setting private_dns_mode hostname || return 1
-    fi
+# set_private_dns <off|auto|hostname> [host]: apply and mark initialized, so
+# later service starts never overwrite a manual choice.
+set_private_dns() {
+    has_cmd settings || return 1
+    case "$1" in
+        off) put_global_setting private_dns_mode off ;;
+        auto) put_global_setting private_dns_mode opportunistic ;;
+        hostname) apply_private_dns_hostname "$2" ;;
+        *) return 1 ;;
+    esac || return 1
     mark_private_dns_initialized
 }
 
 print_private_dns_status() {
-    if ! private_dns_available; then
+    load_private_dns_state
+    if [ "$PDNS_CODE" = "unavailable" ]; then
         echo "Private DNS: unavailable (settings command missing)"
         return 0
     fi
 
-    _mode=$(get_private_dns_mode)
-    _host=$(get_private_dns_hostname)
-    echo "Configured mode: $(get_private_dns_mode_label "$_mode")"
-    if [ "$_mode" = "hostname" ]; then
-        if [ -n "$_host" ]; then
-            echo "Provider hostname: $_host"
-        else
-            echo "Provider hostname: (empty)"
-        fi
-    fi
-    if private_dns_initialized; then
+    echo "Configured mode: $(private_dns_mode_label "$PDNS_MODE")"
+    [ "$PDNS_MODE" = "hostname" ] && echo "Provider hostname: ${PDNS_HOST:-(empty)}"
+    if [ -f "$PRIVATE_DNS_INIT_FILE" ]; then
         echo "Module default: initialized"
     else
         echo "Module default: pending first nzapret start ($DEFAULT_PRIVATE_DNS_HOSTNAME)"
     fi
 }
 
-json_escape() {
-    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+dns_usage() {
+    echo "Usage: nzapret dns status"
+    echo "       nzapret dns set <off|auto|default>"
+    echo "       nzapret dns set hostname <fqdn>"
+    exit 1
 }
 
-json_optional_field() {
-    _key="$1"
-    _value="$2"
-    [ -n "$_value" ] || return 0
-    printf ',"%s":"%s"' "$_key" "$(json_escape "$_value")"
-}
-
-print_human_check() {
-    _status="$1"
-    _detail="$2"
-    case "$_status" in
-        ok)   echo "[OK] $_detail" ;;
-        fail) echo "[!!] $_detail" ;;
-    esac
-}
-
-append_json_check() {
-    # Positional args:
-    # 1=name 2=status 3=detail 4=code 5=detail_code 6=subject
-    # 7=table 8=hook 9=family 10=mode 11=pid 12=hostname 13=default_hostname
-    _name="$1"
-    _status="$2"
-    _detail="$3"
-    _code="${4:-}"
-    _detail_code="${5:-}"
-    _subject="${6:-}"
-    _table="${7:-}"
-    _hook="${8:-}"
-    _family="${9:-}"
-    _mode="${10:-}"
-    _pid="${11:-}"
-    _hostname="${12:-}"
-    _default_hostname="${13:-}"
-    _extra=""
-    [ -n "$_code" ] && _extra="${_extra},\"code\":\"$(json_escape "$_code")\""
-    [ -n "$_detail_code" ] && _extra="${_extra},\"detail_code\":\"$(json_escape "$_detail_code")\""
-    _extra="${_extra}$(json_optional_field "subject" "$_subject")"
-    _extra="${_extra}$(json_optional_field "table" "$_table")"
-    _extra="${_extra}$(json_optional_field "hook" "$_hook")"
-    _extra="${_extra}$(json_optional_field "family" "$_family")"
-    _extra="${_extra}$(json_optional_field "mode" "$_mode")"
-    _extra="${_extra}$(json_optional_field "pid" "$_pid")"
-    _extra="${_extra}$(json_optional_field "hostname" "$_hostname")"
-    _extra="${_extra}$(json_optional_field "default_hostname" "$_default_hostname")"
-    _checks="${_checks}${_sep}{\"name\":\"$(json_escape "$_name")\",\"status\":\"$_status\",\"detail\":\"$(json_escape "$_detail")\"${_extra}}"
-    _sep=","
-    if [ "$_status" = "ok" ]; then
-        _ok=$((_ok + 1))
-    else
-        _fail=$((_fail + 1))
-    fi
-}
-
-# Process management
-is_live_pid() {
-    _pid="$1"
-    [ -n "$_pid" ] || return 1
-    [ -d "/proc/$_pid" ] || return 1
-    _state=$(awk '/^State:/ { print $2; exit }' "/proc/$_pid/status" 2>/dev/null)
-    case "$_state" in
-        Z) return 1 ;;
-    esac
-    return 0
-}
-
-list_live_pids() {
-    for _pid in $(pgrep -x "$PROCESS_NAME" 2>/dev/null); do
-        if is_live_pid "$_pid"; then
-            echo "$_pid"
-        fi
-    done
-}
-
-get_first_pid() {
-    for _pid in $(list_live_pids); do
-        echo "$_pid"
-        return 0
-    done
-    return 1
-}
-
-get_pid_count() {
-    _count=0
-    for _pid in $(list_live_pids); do
-        _count=$((_count + 1))
-    done
-    echo "$_count"
-}
-
-is_running() {
-    [ -n "$(get_first_pid)" ]
-}
-
-# Version
-get_version() {
-    if [ -f "$MODDIR/module.prop" ]; then
-        grep '^version=' "$MODDIR/module.prop" | cut -d= -f2 | tr -d '\r\n'
-    fi
-}
-
-# Profiles
-get_active_profile() {
-    if [ -f "$ACTIVE_PROFILE_FILE" ]; then
-        _pname=$(head -n 1 "$ACTIVE_PROFILE_FILE" 2>/dev/null | tr -d '\r\n')
-        [ -n "$_pname" ] && {
-            echo "$_pname"
-            return
-        }
-    fi
-    echo "$DEFAULT_PROFILE"
-}
-
-get_profile_config_file() {
-    echo "$PROFILE_DIR/$1.conf"
-}
-
-get_active_profile_config() {
-    get_profile_config_file "$(get_active_profile)"
-}
-
+# --- Profiles ---
 profile_uses_user_list() {
-    _pname="$1"
-    _pconfig=$(get_profile_config_file "$_pname")
-    [ -f "$_pconfig" ] || return 1
-    grep -F -q -e "$USER_LIST_FILE" "$_pconfig" 2>/dev/null
+    grep -F -q -e "$USER_LIST_FILE" "$(profile_config_file "$1")" 2>/dev/null
 }
 
 active_profile_uses_user_list() {
     profile_uses_user_list "$(get_active_profile)"
 }
 
-profile_exists() {
-    [ -f "$(get_profile_config_file "$1")" ]
-}
-
-get_profile_label() {
-    _pname="$1"
-    _plabel="$_pname"
-    _pconfig=$(get_profile_config_file "$_pname")
-
-    if [ -f "$_pconfig" ]; then
-        _pline=$(grep -m 1 '^# profile:' "$_pconfig" 2>/dev/null)
-        if [ -n "$_pline" ]; then
-            _plabel=$(printf '%s' "$_pline" | sed 's/^# profile:[[:space:]]*//')
-        fi
-    fi
-
-    echo "$_plabel"
-}
-
 set_active_profile() {
-    _pname="$1"
-    profile_exists "$_pname" || {
-        echo "[-] Unknown profile: $_pname"
-        exit 1
-    }
+    [ -f "$(profile_config_file "$1")" ] || die "[-] Unknown profile: $1"
     mkdir -p "$PROFILE_DIR" >/dev/null 2>&1
-    printf '%s\n' "$_pname" > "$ACTIVE_PROFILE_FILE"
+    printf '%s\n' "$1" > "$ACTIVE_PROFILE_FILE"
 }
 
 list_profiles() {
@@ -386,155 +256,88 @@ list_profiles() {
     [ "$_found" = "1" ] || echo "(no profiles found)"
 }
 
-# Counters with cache
-get_list_count() {
-    _cache_file="$1"
-    _list_file="$2"
-    _force="$3"
-
-    # Return cached value unless forced refresh.
-    if [ "$_force" != "1" ] && [ -f "$_cache_file" ]; then
-        cat "$_cache_file"
+# --- Hostlists ---
+# Line count of the (large) general hostlist, cached in .list_count.
+# Pass 1 to recount and refresh the cache.
+general_list_count() {
+    if [ "$1" != "1" ] && [ -f "$LIST_COUNT_CACHE" ]; then
+        cat "$LIST_COUNT_CACHE"
         return
     fi
-
-    if [ -f "$_list_file" ]; then
-        _count=$(wc -l < "$_list_file" 2>/dev/null || echo 0)
-    else
-        _count=0
-    fi
-
-    echo "$_count" > "$_cache_file" 2>/dev/null
+    _count=0
+    [ -f "$GENERAL_LIST_FILE" ] && _count=$(wc -l < "$GENERAL_LIST_FILE")
+    echo "$_count" > "$LIST_COUNT_CACHE" 2>/dev/null
     echo "$_count"
 }
 
-refresh_counts() {
-    get_list_count "$LIST_COUNT_CACHE" "$GENERAL_LIST_FILE" 1 >/dev/null
-}
-
-get_plain_list_count() {
-    _list_file="$1"
-    if [ -f "$_list_file" ]; then
-        sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$_list_file" | wc -l | tr -d '[:space:]'
+# domain_count <file>: entries excluding blank and comment lines.
+domain_count() {
+    if [ -f "$1" ]; then
+        grep -c -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$1"
     else
         echo 0
     fi
 }
 
-get_user_list_count() {
-    get_plain_list_count "$USER_LIST_FILE"
-}
-
-trim_list_entry() {
-    printf '%s' "$1" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
-}
-
-make_temp_file() {
-    _tmp=$(mktemp 2>/dev/null)
-    if [ -z "$_tmp" ]; then
-        _tmp="/data/local/tmp/nzapret.$$.tmp"
-        : > "$_tmp" 2>/dev/null || return 1
-    fi
-    echo "$_tmp"
-}
-
-write_user_list_entries() {
-    _tmp=$(make_temp_file) || return 1
-    : > "$_tmp" || {
-        rm -f "$_tmp"
-        return 1
-    }
-
-    for _entry in "$@"; do
-        _clean=$(trim_list_entry "$_entry")
-        case "$_clean" in
-            ""|\#*) continue ;;
-        esac
-        if grep -F -x -q -e "$_clean" "$_tmp" 2>/dev/null; then
-            continue
-        fi
-        printf '%s\n' "$_clean" >> "$_tmp" || {
-            rm -f "$_tmp"
-            return 1
-        }
-    done
-
-    mv -f "$_tmp" "$USER_LIST_FILE" || {
-        rm -f "$_tmp"
-        return 1
-    }
-}
-
-append_user_list_entries() {
-    _tmp=$(make_temp_file) || return 1
-    : > "$_tmp" || {
-        rm -f "$_tmp"
-        return 1
-    }
-
-    if [ -f "$USER_LIST_FILE" ]; then
-        while IFS= read -r _line || [ -n "$_line" ]; do
-            printf '%s\n' "$_line" >> "$_tmp" || {
-                rm -f "$_tmp"
-                return 1
-            }
-        done < "$USER_LIST_FILE"
-    fi
-
+# add_list_entries <file> <entries...>: append trimmed, non-comment entries not
+# yet present in <file>; prints how many were added.
+add_list_entries() {
+    _af="$1"; shift
     _added=0
     for _entry in "$@"; do
-        _clean=$(trim_list_entry "$_entry")
+        _clean=$(trim_value "$_entry")
         case "$_clean" in
             ""|\#*) continue ;;
         esac
-        if grep -F -x -q -e "$_clean" "$_tmp" 2>/dev/null; then
-            continue
-        fi
-        printf '%s\n' "$_clean" >> "$_tmp" || {
-            rm -f "$_tmp"
-            return 1
-        }
+        grep -F -x -q -e "$_clean" "$_af" 2>/dev/null && continue
+        printf '%s\n' "$_clean" >> "$_af" || return 1
         _added=$((_added + 1))
     done
+    echo "$_added"
+}
 
-    mv -f "$_tmp" "$USER_LIST_FILE" || {
-        rm -f "$_tmp"
-        return 1
-    }
+# update_user_list <append|replace> <entries...>: rewrite list-user.txt through
+# a temp file; prints how many entries were added.
+update_user_list() {
+    _mode="$1"; shift
+    _tmp=$(make_temp_file) || return 1
+    if [ "$_mode" = "append" ] && [ -f "$USER_LIST_FILE" ]; then
+        # Re-emit line by line so a missing final newline cannot glue entries.
+        while IFS= read -r _line || [ -n "$_line" ]; do
+            printf '%s\n' "$_line"
+        done < "$USER_LIST_FILE" > "$_tmp"
+    else
+        : > "$_tmp"
+    fi || { rm -f "$_tmp"; return 1; }
 
+    _added=$(add_list_entries "$_tmp" "$@") && mv -f "$_tmp" "$USER_LIST_FILE" \
+        || { rm -f "$_tmp"; return 1; }
     echo "$_added"
 }
 
 remove_user_list_entries() {
-    _tmp=$(make_temp_file) || return 1
-    : > "$_tmp" || {
-        rm -f "$_tmp"
-        return 1
-    }
+    [ -f "$USER_LIST_FILE" ] || return 0
+    _pat=$(make_temp_file) || return 1
+    for _entry in "$@"; do
+        _clean=$(trim_value "$_entry")
+        case "$_clean" in
+            ""|\#*) continue ;;
+        esac
+        printf '%s\n' "$_clean"
+    done > "$_pat"
+    [ -s "$_pat" ] || { rm -f "$_pat"; return 0; }
 
-    while IFS= read -r _line || [ -n "$_line" ]; do
-        _keep=1
-        for _entry in "$@"; do
-            _clean=$(trim_list_entry "$_entry")
-            case "$_clean" in
-                ""|\#*) continue ;;
-            esac
-            if [ "$_line" = "$_clean" ]; then
-                _keep=0
-                break
-            fi
-        done
-        [ "$_keep" = "1" ] && printf '%s\n' "$_line" >> "$_tmp"
-    done < "$USER_LIST_FILE"
-
-    mv -f "$_tmp" "$USER_LIST_FILE" || {
-        rm -f "$_tmp"
-        return 1
-    }
+    _tmp=$(make_temp_file) || { rm -f "$_pat"; return 1; }
+    # grep exits 1 when every line got removed; only >1 is a real error.
+    grep -v -F -x -f "$_pat" "$USER_LIST_FILE" > "$_tmp"
+    [ $? -le 1 ] && mv -f "$_tmp" "$USER_LIST_FILE"
+    _rc=$?
+    rm -f "$_tmp" "$_pat"
+    return $_rc
 }
 
 print_user_list_status() {
-    _user_count=$(get_user_list_count)
+    _user_count=$(domain_count "$USER_LIST_FILE")
     if active_profile_uses_user_list; then
         echo "list-user.txt: $_user_count domains (included by current configuration)"
     else
@@ -543,74 +346,71 @@ print_user_list_status() {
     echo ""
     echo "Domains:"
     if [ "$_user_count" -gt 0 ]; then
-        sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$USER_LIST_FILE"
+        grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$USER_LIST_FILE"
     else
         echo "(empty)"
     fi
 }
 
-print_user_list_contents() {
-    [ -f "$USER_LIST_FILE" ] || return 0
-    cat "$USER_LIST_FILE"
+# Download the general hostlist; an empty or failed download keeps the old list.
+update_general_list() {
+    _tmp=$(make_temp_file) || {
+        echo "[-] Failed to create temporary file for list-general.txt"
+        return 1
+    }
+    curl -s -f -L -o "$_tmp" "$DEFAULT_LIST_SOURCE" 2>/dev/null
+    if [ -s "$_tmp" ] && mv -f "$_tmp" "$GENERAL_LIST_FILE"; then
+        echo "[+] list-general.txt updated"
+        return 0
+    fi
+    rm -f "$_tmp"
+    echo "[-] Failed to download list-general.txt"
+    return 1
 }
 
-# Status printers
-
-print_profile_status() {
-    _pname=$(get_active_profile)
-    echo "Configuration preset: $_pname ($(get_profile_label "$_pname"))"
+# nfqws2 rereads hostlists on change; SIGHUP makes it immediate.
+refresh_hostlists_if_running() {
+    _pids=$(list_live_pids "$PROCESS_NAME")
+    if [ -z "$_pids" ]; then
+        echo "[*] nzapret is not running. Changes will apply on next start."
+        return 0
+    fi
+    _reloaded=0
+    for _pid in $_pids; do
+        kill -HUP "$_pid" 2>/dev/null && _reloaded=1
+    done
+    if [ "$_reloaded" = "1" ]; then
+        echo "[*] Sent SIGHUP to nfqws2 to refresh hostlists."
+    else
+        echo "[*] nfqws2 is running. Hostlists reload automatically after file changes."
+    fi
 }
 
-print_firewall_stack_status() {
-    echo "Firewall stack: $(get_firewall_stack_label)"
+# --- Status ---
+print_list_line() {
+    if [ -f "$2" ]; then
+        echo "$1: $3 domains"
+    else
+        echo "$1: MISSING"
+    fi
 }
 
 print_status_human() {
+    load_process_state
+    load_private_dns_state
     _ver=$(get_version)
-    _pid=$(get_first_pid)
-    _pid_count=$(get_pid_count)
-    _rules=$(get_rule_count iptables)
-    _rules6=$(get_rule_count ip6tables)
-    _lc=$(get_list_count "$LIST_COUNT_CACHE" "$GENERAL_LIST_FILE")
-    _google_lc=$(get_plain_list_count "$GOOGLE_LIST_FILE")
-    _user_lc=$(get_user_list_count)
 
     [ -n "$_ver" ] && echo "Module version: $_ver"
-
-    if [ -n "$_pid" ]; then
-        echo "nfqws2: [ON] (PID: $_pid)"
-        [ "$_pid_count" -gt 1 ] && echo "warning: multiple nfqws2 processes detected ($_pid_count)"
-    else
-        echo "nfqws2: [OFF]"
-    fi
-
-    _tgpid=$(tg_pid)
-    _tg_pid_count=$(tg_pid_count)
-    if [ -n "$_tgpid" ]; then
-        echo "nztg: [ON] (PID: $_tgpid)"
-        [ "$_tg_pid_count" -gt 1 ] && echo "warning: multiple nztg processes detected ($_tg_pid_count)"
-    else
-        echo "nztg: [OFF]"
-    fi
-
-    echo "iptables rules: $_rules (IPv4), $_rules6 (IPv6)"
-    print_firewall_stack_status
-    echo "Private DNS: $(get_private_dns_status_summary)"
+    print_process_line "$PROCESS_NAME" "$PID" "$PID_COUNT"
+    print_process_line "$TG_PROCESS_NAME" "$TG_PID" "$TG_PID_COUNT"
+    echo "iptables rules: $(get_rule_count iptables) (IPv4), $(get_rule_count ip6tables) (IPv6)"
+    echo "Firewall stack: $(firewall_stack_label)"
+    echo "Private DNS: $(private_dns_summary)"
     echo ""
 
-    if [ -f "$GENERAL_LIST_FILE" ]; then
-        echo "list-general.txt: $_lc domains"
-    else
-        echo "list-general.txt: MISSING"
-    fi
-
-    if [ -f "$GOOGLE_LIST_FILE" ]; then
-        echo "list-google.txt: $_google_lc domains"
-    else
-        echo "list-google.txt: MISSING"
-    fi
-
-    echo "list-user.txt: $_user_lc domains"
+    print_list_line list-general.txt "$GENERAL_LIST_FILE" "$(general_list_count)"
+    print_list_line list-google.txt "$GOOGLE_LIST_FILE" "$(domain_count "$GOOGLE_LIST_FILE")"
+    echo "list-user.txt: $(domain_count "$USER_LIST_FILE") domains"
     if active_profile_uses_user_list; then
         echo "list-user binding: included by current configuration"
     else
@@ -619,197 +419,124 @@ print_status_human() {
 }
 
 print_status_json() {
-    _pid=$(get_first_pid)
-    _pid_count=$(get_pid_count)
-    if [ -n "$_pid" ]; then
-        _active=true
-    else
-        _active=false
-    fi
-
-    _ver=$(get_version)
-    _rules=$(get_rule_count iptables)
-    _rules6=$(get_rule_count ip6tables)
-    _lc=$(get_list_count "$LIST_COUNT_CACHE" "$GENERAL_LIST_FILE")
-    _google_lc=$(get_plain_list_count "$GOOGLE_LIST_FILE")
-    _user_lc=$(get_user_list_count)
-    _prof_name=$(get_active_profile)
-    _prof_label=$(get_profile_label "$_prof_name")
-    _private_dns_mode=$(get_private_dns_mode)
-    _private_dns_mode_label=$(get_private_dns_mode_label "$_private_dns_mode")
-    _private_dns_hostname=$(get_private_dns_hostname)
-    _private_dns_label=$(get_private_dns_display_label)
-    if active_profile_uses_user_list; then
-        _user_attached=true
-    else
-        _user_attached=false
-    fi
-    if private_dns_available; then
-        _private_dns_available=true
-    else
-        _private_dns_available=false
-    fi
-    if private_dns_initialized; then
-        _private_dns_initialized=true
-    else
-        _private_dns_initialized=false
-    fi
-    if tg_active; then
-        _tg_active=true
-    else
-        _tg_active=false
-    fi
-    _tg_pid=$(tg_pid)
-    _tg_port=$(get_tg_conf port "$DEFAULT_TG_PORT")
-    _tg_cf=$(get_tg_conf cf_enabled 1)
-    if [ "$_tg_cf" = "0" ]; then _tg_cf_enabled=false; else _tg_cf_enabled=true; fi
+    load_process_state
+    load_private_dns_state
+    _prof=$(get_active_profile)
 
     printf '{"version":"%s","active":%s,"pid":"%s","pid_count":%s,"rules_v4":%s,"rules_v6":%s,"domain_count":%s,"google_domain_count":%s,"user_domain_count":%s,"user_list_attached":%s,"profile":"%s","profile_label":"%s","private_dns_available":%s,"private_dns_initialized":%s,"private_dns_mode":"%s","private_dns_mode_label":"%s","private_dns_hostname":"%s","private_dns_label":"%s","private_dns_default_hostname":"%s","tg_active":%s,"tg_pid":"%s","tg_port":"%s","tg_cf_enabled":%s}\n' \
-        "$(json_escape "$_ver")" "$_active" "$(json_escape "$_pid")" "$_pid_count" "$_rules" "$_rules6" "$_lc" "$_google_lc" "$_user_lc" "$_user_attached" "$(json_escape "$_prof_name")" "$(json_escape "$_prof_label")" "$_private_dns_available" "$_private_dns_initialized" "$(json_escape "$_private_dns_mode")" "$(json_escape "$_private_dns_mode_label")" "$(json_escape "$_private_dns_hostname")" "$(json_escape "$_private_dns_label")" "$(json_escape "$DEFAULT_PRIVATE_DNS_HOSTNAME")" "$_tg_active" "$(json_escape "$_tg_pid")" "$(json_escape "$_tg_port")" "$_tg_cf_enabled"
+        "$(json_escape "$(get_version)")" \
+        "$(bool [ -n "$PID" ])" \
+        "$PID" \
+        "$PID_COUNT" \
+        "$(get_rule_count iptables)" \
+        "$(get_rule_count ip6tables)" \
+        "$(general_list_count)" \
+        "$(domain_count "$GOOGLE_LIST_FILE")" \
+        "$(domain_count "$USER_LIST_FILE")" \
+        "$(bool profile_uses_user_list "$_prof")" \
+        "$(json_escape "$_prof")" \
+        "$(json_escape "$(get_profile_label "$_prof")")" \
+        "$(bool [ "$PDNS_CODE" != "unavailable" ])" \
+        "$(bool [ -f "$PRIVATE_DNS_INIT_FILE" ])" \
+        "$(json_escape "$PDNS_MODE")" \
+        "$(json_escape "$(private_dns_mode_label "$PDNS_MODE")")" \
+        "$(json_escape "$PDNS_HOST")" \
+        "$(json_escape "$(private_dns_label)")" \
+        "$(json_escape "$DEFAULT_PRIVATE_DNS_HOSTNAME")" \
+        "$(bool [ -n "$TG_PID" ])" \
+        "$TG_PID" \
+        "$(json_escape "$(get_tg_conf port "$DEFAULT_TG_PORT")")" \
+        "$(bool [ "$(get_tg_conf cf_enabled 1)" != "0" ])"
 }
 
-get_rule_count() {
-    _tbl_cmd="$1"
-    $_tbl_cmd -w -t mangle -L "$CHAIN" -n 2>/dev/null | grep -c NFQUEUE
+# --- Service control ---
+start_service() {
+    "$MODDIR/service.sh" manual && is_running
 }
 
-check_jump_rule() {
-    _tbl_cmd="$1"
-    _hook="$2"
-    $_tbl_cmd -w -t mangle -C "$_hook" -j "$CHAIN" >/dev/null 2>&1
+# report_started <verb>
+report_started() {
+    load_process_state
+    echo "[+] nfqws2 $1 successfully (PID: $PID)"
+    [ -n "$TG_PID" ] && echo "[+] nztg $1 successfully (PID: $TG_PID)"
+    return 0
 }
 
-has_jump_rules() {
-    check_jump_rule iptables OUTPUT && return 0
-    check_jump_rule iptables FORWARD && return 0
-    check_jump_rule ip6tables OUTPUT && return 0
-    check_jump_rule ip6tables FORWARD && return 0
-    return 1
-}
+# Stop both daemons and tear down the firewall, escalating to SIGKILL.
+stop_service() {
+    "$MODDIR/uninstall.sh" >/dev/null 2>&1
 
-cleanup_jump_rules_local() {
-    while check_jump_rule iptables OUTPUT; do
-        iptables -w -t mangle -D OUTPUT -j "$CHAIN" >/dev/null 2>&1 || break
-    done
-    while check_jump_rule iptables FORWARD; do
-        iptables -w -t mangle -D FORWARD -j "$CHAIN" >/dev/null 2>&1 || break
-    done
-    iptables -w -t mangle -F "$CHAIN" >/dev/null 2>&1
-    iptables -w -t mangle -X "$CHAIN" >/dev/null 2>&1
-
-    if has_cmd ip6tables; then
-        while check_jump_rule ip6tables OUTPUT; do
-            ip6tables -w -t mangle -D OUTPUT -j "$CHAIN" >/dev/null 2>&1 || break
-        done
-        while check_jump_rule ip6tables FORWARD; do
-            ip6tables -w -t mangle -D FORWARD -j "$CHAIN" >/dev/null 2>&1 || break
-        done
-        ip6tables -w -t mangle -F "$CHAIN" >/dev/null 2>&1
-        ip6tables -w -t mangle -X "$CHAIN" >/dev/null 2>&1
+    wait_for_exit "$TG_PROCESS_NAME" || killall -9 "$TG_PROCESS_NAME" 2>/dev/null
+    if ! wait_for_exit "$PROCESS_NAME"; then
+        killall -9 "$PROCESS_NAME" 2>/dev/null
+        wait_for_exit "$PROCESS_NAME" 3 || return 1
     fi
+
+    # uninstall.sh already tore the chains down; retry once if a jump survived.
+    has_jump_rules && cleanup_tables
+    ! has_jump_rules
 }
 
-wait_for_process_exit() {
-    _tries="${1:-15}"
-    while is_running && [ "$_tries" -gt 0 ]; do
-        sleep 0.1 2>/dev/null || sleep 1
-        _tries=$((_tries - 1))
-    done
-    ! is_running
-}
-
-run_uninstall_cleanup() {
-    "$MODDIR/uninstall.sh" >/dev/null 2>&1 || true
-}
-
-# Telegram proxy (nztgproxy)
-tg_pid() {
-    pgrep -x "$TG_PROCESS_NAME" 2>/dev/null | head -n 1
-}
-
-tg_active() {
-    [ -n "$(tg_pid)" ]
-}
-
-tg_pid_count() {
-    _count=0
-    for _pid in $(pgrep -x "$TG_PROCESS_NAME" 2>/dev/null); do
-        if is_live_pid "$_pid"; then
-            _count=$((_count + 1))
-        fi
-    done
-    echo "$_count"
-}
-
-ensure_tg_secret() {
-    [ -f "$TG_SECRET_FILE" ] && [ -s "$TG_SECRET_FILE" ] && return 0
+# --- Telegram proxy (nztgproxy) ---
+# Generate a new MTProto secret, store it, and print it.
+write_tg_secret() {
     [ -f "$NZTG_BIN" ] || return 1
-    "$NZTG_BIN" gensecret > "$TG_SECRET_FILE" 2>/dev/null || return 1
+    _sec=$("$NZTG_BIN" gensecret 2>/dev/null) || return 1
+    [ -n "$_sec" ] || return 1
+    printf '%s\n' "$_sec" > "$TG_SECRET_FILE" || return 1
     chmod 600 "$TG_SECRET_FILE" 2>/dev/null
+    echo "$_sec"
 }
 
 get_tg_secret() {
-    ensure_tg_secret || return 1
-    head -n 1 "$TG_SECRET_FILE" 2>/dev/null | tr -d '\r\n'
+    if [ -s "$TG_SECRET_FILE" ]; then
+        head -n 1 "$TG_SECRET_FILE" 2>/dev/null | tr -d '\r\n'
+    else
+        write_tg_secret
+    fi
 }
 
 get_tg_link() {
-    _tgh=$(get_tg_conf host "$DEFAULT_TG_HOST")
-    _tgp=$(get_tg_conf port "$DEFAULT_TG_PORT")
     _tgs=$(get_tg_secret) || return 1
-    printf 'tg://proxy?server=%s&port=%s&secret=dd%s' "$_tgh" "$_tgp" "$_tgs"
+    printf 'tg://proxy?server=%s&port=%s&secret=dd%s' \
+        "$(get_tg_conf host "$DEFAULT_TG_HOST")" "$(get_tg_conf port "$DEFAULT_TG_PORT")" "$_tgs"
 }
 
 # Validate a multi-line DC->IP ruleset (one "n:IP" per line). Prints cleaned
 # rules on success; returns 1 on any invalid line.
 validate_tg_dc_rules() {
-    _clean=""
     while IFS= read -r _line || [ -n "$_line" ]; do
-        _line=$(printf '%s' "$_line" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-        [ -n "$_line" ] || continue
+        _line=$(trim_value "$_line")
         case "$_line" in
-            \#*) continue ;;
+            ""|\#*) continue ;;
         esac
-        _num="${_line%%:*}"
-        _ip="${_line#*:}"
-        case "$_num" in
+        case "${_line%%:*}" in
             ''|*[!0-9]*) return 1 ;;
         esac
-        case "$_ip" in
-            *[!0-9.]*|'') return 1 ;;
+        case "${_line#*:}" in
+            ''|*[!0-9.]*) return 1 ;;
         esac
-        _clean="${_clean}${_line}
-"
+        printf '%s\n' "$_line"
     done
-    printf '%s' "$_clean"
 }
 
-# Rewrite a single-value key in tgproxy.conf, preserving the rest.
-tg_set_single() {
-    _sk="$1"; _sv="$2"
+# tg_conf_set <key> [value...]: replace every `key=` line with one per value.
+tg_conf_set() {
+    _key="$1"; shift
     ensure_tgproxy_conf
-    _stmp=$(make_temp_file) || return 1
-    grep -v "^$_sk=" "$TGPROXY_CONF" 2>/dev/null > "$_stmp"
-    printf '%s=%s\n' "$_sk" "$_sv" >> "$_stmp"
-    mv -f "$_stmp" "$TGPROXY_CONF"
-}
-
-# Replace all dc= rules with the given cleaned (newline-separated) ruleset.
-tg_set_dc() {
-    _rules="$1"
-    ensure_tgproxy_conf
-    _dtmp=$(make_temp_file) || return 1
-    grep -v "^dc=" "$TGPROXY_CONF" 2>/dev/null > "$_dtmp"
-    printf '%s' "$_rules" | while IFS= read -r _r || [ -n "$_r" ]; do
-        [ -n "$_r" ] && printf 'dc=%s\n' "$_r" >> "$_dtmp"
-    done
-    mv -f "$_dtmp" "$TGPROXY_CONF"
+    _tmp=$(make_temp_file) || return 1
+    grep -v "^$_key=" "$TGPROXY_CONF" > "$_tmp" 2>/dev/null
+    for _v in "$@"; do
+        printf '%s=%s\n' "$_key" "$_v"
+    done >> "$_tmp"
+    mv -f "$_tmp" "$TGPROXY_CONF"
 }
 
 print_tg_status() {
     ensure_tgproxy_conf
-    if tg_active; then
-        echo "nztgproxy: [ON] (PID: $(tg_pid))"
+    load_process_state
+    if [ -n "$TG_PID" ]; then
+        echo "nztgproxy: [ON] (PID: $TG_PID)"
     else
         echo "nztgproxy: [OFF]"
     fi
@@ -827,444 +554,244 @@ print_tg_status() {
             echo "Cloudflare proxy: enabled (auto domains)"
         fi
     fi
+    if [ "$(get_tg_conf preresolve_enabled 1)" = "0" ]; then
+        echo "DC pre-resolve: disabled"
+    else
+        echo "DC pre-resolve: enabled"
+    fi
     echo "Datacenters:"
-    get_tg_dc_lines | while IFS= read -r _d; do
-        [ -n "$_d" ] && echo "  $_d"
+    for _d in $(get_tg_dc_lines); do
+        echo "  $_d"
     done
 }
 
 print_tg_status_json() {
     ensure_tgproxy_conf
-    _h=$(get_tg_conf host "$DEFAULT_TG_HOST")
-    _p=$(get_tg_conf port "$DEFAULT_TG_PORT")
-    _cf=$(get_tg_conf cf_enabled 1)
-    _cfd=$(get_tg_conf cf_domain "")
-    _pre=$(get_tg_conf preresolve_enabled 1)
-    _sec=$(get_tg_secret)
-    _link=$(get_tg_link)
-    if [ "$_cf" = "0" ]; then _cfb=false; else _cfb=true; fi
-    if [ "$_pre" = "0" ]; then _preb=false; else _preb=true; fi
-    if tg_active; then _act=true; else _act=false; fi
-    _tpid=$(tg_pid)
-    _dcs=$(get_tg_dc_lines | while IFS= read -r _d; do
-        [ -n "$_d" ] && printf '"%s",' "$(json_escape "$_d")"
-    done)
-    _dcs=${_dcs%,}
+    load_process_state
+    _dcs=""
+    for _d in $(get_tg_dc_lines); do
+        _dcs="${_dcs:+$_dcs,}\"$(json_escape "$_d")\""
+    done
     printf '{"host":"%s","port":"%s","secret":"%s","link":"%s","dc_redirects":[%s],"cf_enabled":%s,"cf_domain":"%s","preresolve_enabled":%s,"active":%s,"pid":"%s"}\n' \
-        "$(json_escape "$_h")" "$(json_escape "$_p")" "$(json_escape "$_sec")" "$(json_escape "$_link")" "$_dcs" "$_cfb" "$(json_escape "$_cfd")" "$_preb" "$_act" "$(json_escape "$_tpid")"
+        "$(json_escape "$(get_tg_conf host "$DEFAULT_TG_HOST")")" \
+        "$(json_escape "$(get_tg_conf port "$DEFAULT_TG_PORT")")" \
+        "$(json_escape "$(get_tg_secret)")" \
+        "$(json_escape "$(get_tg_link)")" \
+        "$_dcs" \
+        "$(bool [ "$(get_tg_conf cf_enabled 1)" != "0" ])" \
+        "$(json_escape "$(get_tg_conf cf_domain "")")" \
+        "$(bool [ "$(get_tg_conf preresolve_enabled 1)" != "0" ])" \
+        "$(bool [ -n "$TG_PID" ])" \
+        "$TG_PID"
 }
 
-stop_tgproxy() {
-    killall "$TG_PROCESS_NAME" 2>/dev/null
-    _tg_tries=15
-    while tg_active && [ "$_tg_tries" -gt 0 ]; do
-        sleep 0.1 2>/dev/null || sleep 1
-        _tg_tries=$((_tg_tries - 1))
+# --- Diagnostics ---
+# diag <ok|fail> <human text> <json name> <json detail> <code> <detail_code> [key=value...]
+# Prints one check as a human-readable line, or appends it to DIAG_CHECKS when
+# DIAG_JSON=1. Empty key=value extras are omitted from the JSON object.
+diag() {
+    _st="$1"; _human="$2"; _name="$3"; _detail="$4"; _code="$5"; _dcode="$6"
+    shift 6
+    if [ "$DIAG_JSON" != "1" ]; then
+        if [ "$_st" = "ok" ]; then echo "[OK] $_human"; else echo "[!!] $_human"; fi
+        return 0
+    fi
+
+    _obj="{\"name\":\"$(json_escape "$_name")\",\"status\":\"$_st\",\"detail\":\"$(json_escape "$_detail")\",\"code\":\"$_code\",\"detail_code\":\"$_dcode\""
+    for _kv in "$@"; do
+        [ -n "${_kv#*=}" ] && _obj="$_obj,\"${_kv%%=*}\":\"$(json_escape "${_kv#*=}")\""
     done
-    tg_active && killall -9 "$TG_PROCESS_NAME" 2>/dev/null
-}
-
-# Service control
-start_service() {
-    "$MODDIR/service.sh" manual || return 1
-    is_running
-}
-
-stop_service() {
-    run_uninstall_cleanup
-    stop_tgproxy
-
-    if ! wait_for_process_exit 15; then
-        killall -9 "$PROCESS_NAME" 2>/dev/null
-        wait_for_process_exit 3 || return 1
+    DIAG_CHECKS="${DIAG_CHECKS:+$DIAG_CHECKS,}$_obj}"
+    if [ "$_st" = "ok" ]; then
+        DIAG_OK=$((DIAG_OK + 1))
+    else
+        DIAG_FAIL=$((DIAG_FAIL + 1))
     fi
+}
 
-    if has_jump_rules; then
-        cleanup_jump_rules_local
-        has_jump_rules && return 1
+diag_process() {
+    if [ -n "$2" ]; then
+        diag ok "$1 running (PID: $2)" "$1 process" "running (pid: $2)" process running "subject=$1" "pid=$2"
+    else
+        diag fail "$1 is not running" "$1 process" "not running" process not_running "subject=$1"
     fi
-
-    return 0
 }
 
-# Safe download (uses tmp file + size check + HTTP error protection)
-download_to_tmp() {
-    _url="$1"
-    _dest="$2"
-    _label="$3"
-    _tmp=$(make_temp_file) || {
-        echo "[-] Failed to create temporary file for $_label"
-        return 1
-    }
-
-    curl -s -f -L -o "$_tmp" "$_url" 2>/dev/null
-    if [ -s "$_tmp" ]; then
-        mv -f "$_tmp" "$_dest"
-        echo "[+] $_label updated"
-        return 0
+# diag_jump <table> <family> <hook>
+diag_jump() {
+    if check_jump_rule "$1" "$3"; then
+        diag ok "$1 $3 jump present" "$1 $3" "jump present" jump_rule present "subject=$1" "table=$1" "hook=$3" "family=$2"
+    else
+        diag fail "$1 $3 jump missing" "$1 $3" "jump missing" jump_rule missing "subject=$1" "table=$1" "hook=$3" "family=$2"
     fi
-
-    rm -f "$_tmp"
-    echo "[-] Failed to download $_label"
-    return 1
 }
 
-update_list_file() {
-    download_to_tmp "$DEFAULT_LIST_SOURCE" "$GENERAL_LIST_FILE" "list-general.txt"
-}
-
-list_required_runtime_files() {
-    _active_profile_config=$(get_active_profile_config)
-    printf '%s\n' \
-        "$BIN" \
-        "$_active_profile_config" \
-        "$GENERAL_LIST_FILE" \
-        "$USER_LIST_FILE" \
-        "$GOOGLE_LIST_FILE" \
-        "$LUA_DIR/zapret-lib.lua" \
-        "$LUA_DIR/zapret-antidpi.lua" \
-        "$PAYLOAD_QUIC_FILE" \
-        "$PAYLOAD_TLS_FILE"
-}
-
-refresh_hostlists_if_running() {
-    if is_running; then
-        _reloaded=0
-        for _pid in $(list_live_pids); do
-            if kill -HUP "$_pid" 2>/dev/null; then
-                _reloaded=1
-            fi
-        done
-        if [ "$_reloaded" = "1" ]; then
-            echo "[*] Sent SIGHUP to nfqws2 to refresh hostlists."
-        else
-            echo "[*] nfqws2 is running. Hostlists reload automatically after file changes."
-        fi
-        return 0
-    fi
-    echo "[*] nzapret is not running. Changes will apply on next start."
-    return 0
-}
-
-# Diagnostics
+# run_diagnose [1]: human-readable checklist, or JSON when called with 1.
 run_diagnose() {
-    echo "nzapret diagnostics"
-    echo "--------------------"
+    DIAG_JSON="$1"
+    DIAG_CHECKS=""
+    DIAG_OK=0
+    DIAG_FAIL=0
+    if [ "$DIAG_JSON" != "1" ]; then
+        echo "nzapret diagnostics"
+        echo "--------------------"
+    fi
 
     for _cmd in $DIAGNOSE_COMMANDS; do
         if has_cmd "$_cmd"; then
-            print_human_check ok "command available: $_cmd"
+            diag ok "command available: $_cmd" "$_cmd" "command available" command available "subject=$_cmd"
         else
-            print_human_check fail "missing command: $_cmd"
+            diag fail "missing command: $_cmd" "$_cmd" "command missing" command missing "subject=$_cmd"
         fi
     done
 
-    if has_cmd ip6tables; then
-        if ip6tables_supported; then
-            print_human_check ok "command available: ip6tables"
-        else
-            print_human_check fail "ip6tables present but unusable"
-        fi
+    if ! has_cmd ip6tables; then
+        diag ok "ip6tables missing, IPv4-only firewall" ip6tables "missing, IPv4-only firewall" ip6tables_runtime missing_fallback subject=ip6tables family=ipv6
+    elif ipv6_firewall_enabled; then
+        diag ok "command available: ip6tables" ip6tables "command available" ip6tables_runtime available subject=ip6tables family=ipv6
     else
-        print_human_check ok "ip6tables missing, IPv4-only firewall"
+        diag fail "ip6tables present but unusable" ip6tables "present but unusable" ip6tables_runtime unusable subject=ip6tables family=ipv6
     fi
 
-    for _file in $(list_required_runtime_files); do
+    for _file in "$(profile_config_file "$(get_active_profile)")" "$USER_LIST_FILE" $(list_required_files); do
+        _fname=${_file##*/}
         if [ -f "$_file" ]; then
-            print_human_check ok "file present: $_file"
+            diag ok "file present: $_file" "$_fname" "file present" runtime_file present "subject=$_fname"
         else
-            print_human_check fail "missing file: $_file"
+            diag fail "missing file: $_file" "$_fname" "file missing" runtime_file missing "subject=$_fname"
         fi
     done
 
-    _pid=$(get_first_pid)
-    if [ -n "$_pid" ]; then
-        print_human_check ok "$PROCESS_NAME running (PID: $_pid)"
-    else
-        print_human_check fail "$PROCESS_NAME is not running"
-    fi
-
-    _tgpid=$(tg_pid)
-    if [ -n "$_tgpid" ]; then
-        print_human_check ok "$TG_PROCESS_NAME running (PID: $_tgpid)"
-    else
-        print_human_check fail "$TG_PROCESS_NAME is not running"
-    fi
+    load_process_state
+    diag_process "$PROCESS_NAME" "$PID"
+    diag_process "$TG_PROCESS_NAME" "$TG_PID"
 
     if active_profile_uses_user_list; then
-        print_human_check ok "current configuration includes list-user.txt"
+        diag ok "current configuration includes list-user.txt" "list-user binding" "current configuration includes list-user.txt" userlist_binding attached subject=list-user.txt
     else
-        print_human_check fail "current configuration does not reference list-user.txt"
+        diag fail "current configuration does not reference list-user.txt" "list-user binding" "current configuration does not reference list-user.txt" userlist_binding detached subject=list-user.txt
     fi
 
-    print_human_check ok "$(print_firewall_stack_status)"
-    if private_dns_available; then
-        print_human_check ok "Private DNS: $(get_private_dns_status_summary)"
+    _stack=$(firewall_stack_label)
+    if ipv6_firewall_enabled; then _stack_code=dual_stack; else _stack_code=ipv4_only; fi
+    diag ok "Firewall stack: $_stack" "firewall stack" "$_stack" ip_stack "$_stack_code" family=ipv6
+
+    load_private_dns_state
+    if [ "$PDNS_CODE" = "unavailable" ]; then
+        diag fail "Private DNS unavailable: settings command missing" "private dns" "settings command missing" private_dns unavailable "default_hostname=$DEFAULT_PRIVATE_DNS_HOSTNAME"
     else
-        print_human_check fail "Private DNS unavailable: settings command missing"
+        _pdns=$(private_dns_summary)
+        diag ok "Private DNS: $_pdns" "private dns" "$_pdns" private_dns "$PDNS_CODE" "hostname=$PDNS_HOST" "default_hostname=$DEFAULT_PRIVATE_DNS_HOSTNAME"
     fi
 
     for _hook in OUTPUT FORWARD; do
-        if check_jump_rule iptables "$_hook"; then
-            print_human_check ok "iptables $_hook jump present"
-        else
-            print_human_check fail "iptables $_hook jump missing"
-        fi
-
+        diag_jump iptables ipv4 "$_hook"
         if ipv6_firewall_enabled; then
-            if check_jump_rule ip6tables "$_hook"; then
-                print_human_check ok "ip6tables $_hook jump present"
-            else
-                print_human_check fail "ip6tables $_hook jump missing"
-            fi
+            diag_jump ip6tables ipv6 "$_hook"
         else
-            print_human_check ok "ip6tables $_hook skipped (IPv4-only firewall)"
+            diag ok "ip6tables $_hook skipped (IPv4-only firewall)" "ip6tables $_hook" "skipped (IPv4-only firewall)" jump_rule skipped_no_ipv6 subject=ip6tables table=ip6tables "hook=$_hook" family=ipv6
         fi
     done
 
     if has_cmd ip; then
         if ip route get 1.1.1.1 >/dev/null 2>&1; then
-            print_human_check ok "IPv4 route lookup works"
+            diag ok "IPv4 route lookup works" "IPv4 routing" "route lookup works" routing ok family=ipv4
         else
-            print_human_check fail "IPv4 route lookup failed"
-        fi
-
-        if ipv6_network_available; then
-            print_human_check ok "IPv6 route lookup works"
-        else
-            print_human_check ok "IPv6 not available on this network"
-        fi
-    fi
-}
-
-run_diagnose_json() {
-    _checks=""
-    _ok=0
-    _fail=0
-    _sep=""
-
-    for _cmd in $DIAGNOSE_COMMANDS; do
-        if has_cmd "$_cmd"; then
-            append_json_check "$_cmd" "ok" "command available" "command" "available" "$_cmd"
-        else
-            append_json_check "$_cmd" "fail" "command missing" "command" "missing" "$_cmd"
-        fi
-    done
-
-    if has_cmd ip6tables; then
-        if ip6tables_supported; then
-            append_json_check "ip6tables" "ok" "command available" "ip6tables_runtime" "available" "ip6tables" "" "" "ipv6"
-        else
-            append_json_check "ip6tables" "fail" "present but unusable" "ip6tables_runtime" "unusable" "ip6tables" "" "" "ipv6"
-        fi
-    else
-        append_json_check "ip6tables" "ok" "missing, IPv4-only firewall" "ip6tables_runtime" "missing_fallback" "ip6tables" "" "" "ipv6"
-    fi
-
-    for _file in $(list_required_runtime_files); do
-        _fname=$(basename "$_file")
-        if [ -f "$_file" ]; then
-            append_json_check "$_fname" "ok" "file present" "runtime_file" "present" "$_fname"
-        else
-            append_json_check "$_fname" "fail" "file missing" "runtime_file" "missing" "$_fname"
-        fi
-    done
-
-    _pid=$(get_first_pid)
-    if [ -n "$_pid" ]; then
-        append_json_check "$PROCESS_NAME process" "ok" "running (pid: $_pid)" "process" "running" "$PROCESS_NAME" "" "" "" "" "$_pid"
-    else
-        append_json_check "$PROCESS_NAME process" "fail" "not running" "process" "not_running" "$PROCESS_NAME"
-    fi
-
-    _tgpid=$(tg_pid)
-    if [ -n "$_tgpid" ]; then
-        append_json_check "$TG_PROCESS_NAME process" "ok" "running (pid: $_tgpid)" "process" "running" "$TG_PROCESS_NAME" "" "" "" "" "$_tgpid"
-    else
-        append_json_check "$TG_PROCESS_NAME process" "fail" "not running" "process" "not_running" "$TG_PROCESS_NAME"
-    fi
-
-    if active_profile_uses_user_list; then
-        append_json_check "list-user binding" "ok" "current configuration includes list-user.txt" "userlist_binding" "attached" "list-user.txt"
-    else
-        append_json_check "list-user binding" "fail" "current configuration does not reference list-user.txt" "userlist_binding" "detached" "list-user.txt"
-    fi
-
-    append_json_check "firewall stack" "ok" "$(get_firewall_stack_label)" "ip_stack" "$(get_firewall_stack_code)" "" "" "" "ipv6"
-    if private_dns_available; then
-        _private_dns_code=$(get_private_dns_status_code)
-        _private_dns_host=$(get_private_dns_hostname)
-        append_json_check "private dns" "ok" "$(get_private_dns_status_summary)" "private_dns" "$_private_dns_code" "" "" "" "" "" "" "$_private_dns_host" "$DEFAULT_PRIVATE_DNS_HOSTNAME"
-    else
-        append_json_check "private dns" "fail" "settings command missing" "private_dns" "unavailable" "" "" "" "" "" "" "" "$DEFAULT_PRIVATE_DNS_HOSTNAME"
-    fi
-
-    for _hook in OUTPUT FORWARD; do
-        if check_jump_rule iptables "$_hook"; then
-            append_json_check "iptables $_hook" "ok" "jump present" "jump_rule" "present" "iptables" "iptables" "$_hook" "ipv4"
-        else
-            append_json_check "iptables $_hook" "fail" "jump missing" "jump_rule" "missing" "iptables" "iptables" "$_hook" "ipv4"
-        fi
-        if ipv6_firewall_enabled; then
-            if check_jump_rule ip6tables "$_hook"; then
-                append_json_check "ip6tables $_hook" "ok" "jump present" "jump_rule" "present" "ip6tables" "ip6tables" "$_hook" "ipv6"
-            else
-                append_json_check "ip6tables $_hook" "fail" "jump missing" "jump_rule" "missing" "ip6tables" "ip6tables" "$_hook" "ipv6"
-            fi
-        else
-            append_json_check "ip6tables $_hook" "ok" "skipped (IPv4-only firewall)" "jump_rule" "skipped_no_ipv6" "ip6tables" "ip6tables" "$_hook" "ipv6"
-        fi
-    done
-
-    if has_cmd ip; then
-        if ip route get 1.1.1.1 >/dev/null 2>&1; then
-            append_json_check "IPv4 routing" "ok" "route lookup works" "routing" "ok" "" "" "" "ipv4"
-        else
-            append_json_check "IPv4 routing" "fail" "route lookup failed" "routing" "fail" "" "" "" "ipv4"
+            diag fail "IPv4 route lookup failed" "IPv4 routing" "route lookup failed" routing fail family=ipv4
         fi
         if ipv6_network_available; then
-            append_json_check "IPv6 routing" "ok" "route lookup works" "routing" "ok" "" "" "" "ipv6"
+            diag ok "IPv6 route lookup works" "IPv6 routing" "route lookup works" routing ok family=ipv6
         else
-            append_json_check "IPv6 routing" "ok" "not available on this network" "routing" "unavailable" "" "" "" "ipv6"
+            diag ok "IPv6 not available on this network" "IPv6 routing" "not available on this network" routing unavailable family=ipv6
         fi
     fi
 
-    _total=$((_ok + _fail))
-    printf '{"checks":[%s],"summary":{"ok":%d,"fail":%d,"total":%d}}\n' \
-        "$_checks" "$_ok" "$_fail" "$_total"
-}
-
-print_events_text() {
-    _tail="${1:-30}"
-    if [ -f "$EVENTLOG" ]; then
-        tail -n "$_tail" "$EVENTLOG"
-    else
-        echo "No events recorded yet."
+    if [ "$DIAG_JSON" = "1" ]; then
+        printf '{"checks":[%s],"summary":{"ok":%d,"fail":%d,"total":%d}}\n' \
+            "$DIAG_CHECKS" "$DIAG_OK" "$DIAG_FAIL" $((DIAG_OK + DIAG_FAIL))
     fi
 }
 
+# --- Events ---
 print_events_json() {
-    _tail="${1:-30}"
     [ -f "$EVENTLOG" ] || { echo '[]'; return; }
-    tail -n "$_tail" "$EVENTLOG" 2>/dev/null | {
-        printf '['
+    tail -n "$1" "$EVENTLOG" 2>/dev/null | {
         _sep=""
-        _found=0
+        printf '['
         while read -r _date _clock _type _msg || [ -n "$_date$_clock$_type$_msg" ]; do
             [ -n "$_date$_clock$_type" ] || continue
             printf '%s{"time":"%s %s","type":"%s","message":"%s"}' \
-                "$_sep" \
-                "$_date" \
-                "$_clock" \
-                "$_type" \
-                "$(json_escape "$_msg")"
+                "$_sep" "$_date" "$_clock" "$_type" "$(json_escape "$_msg")"
             _sep=","
-            _found=1
         done
-        [ "$_found" = "1" ] || printf ''
         printf ']\n'
     }
 }
 
-# Entry point
+# --- Entry point ---
 ensure_runtime_layout
-
-[ $# -eq 0 ] && {
-    set -- help
-}
 
 case "$1" in
     "start")
-        if is_running; then
-            echo "[!] nfqws2 is already running. Use 'nzapret restart' instead."
-            exit 1
-        fi
+        is_running && die "[!] nfqws2 is already running. Use 'nzapret restart' instead."
         echo "[*] Starting nzapret..."
-        if start_service; then
-            _pid=$(get_first_pid)
-            echo "[+] nfqws2 started successfully (PID: $_pid)"
-            tg_active && echo "[+] nztg started successfully (PID: $(tg_pid))"
-        else
-            echo "[-] Failed to start nfqws2. Check 'nzapret log' for details."
-            exit 1
-        fi
+        start_service || die "[-] Failed to start nfqws2. Check 'nzapret log' for details."
+        report_started started
         ;;
 
     "stop")
         echo "[*] Stopping nzapret..."
-        if stop_service; then
+        if stop_service || ! has_jump_rules; then
             echo "[+] Stopped"
         else
-            if ! has_jump_rules; then
-                echo "[+] Stopped"
-            else
-                echo "[-] Failed to stop cleanly. Check 'nzapret log' for details."
-                exit 1
-            fi
+            die "[-] Failed to stop cleanly. Check 'nzapret log' for details."
         fi
         ;;
 
     "restart")
         echo "[*] Restarting nzapret..."
-        if ! stop_service; then
-            echo "[-] Failed to stop current nfqws2 instance cleanly."
-            exit 1
-        fi
-        if start_service; then
-            _pid=$(get_first_pid)
-            echo "[+] nfqws2 restarted successfully (PID: $_pid)"
-            tg_active && echo "[+] nztg restarted successfully (PID: $(tg_pid))"
-        else
-            echo "[-] Failed to restart nfqws2. Check 'nzapret log' for details."
-            exit 1
-        fi
+        stop_service || die "[-] Failed to stop current nfqws2 instance cleanly."
+        start_service || die "[-] Failed to restart nfqws2. Check 'nzapret log' for details."
+        report_started restarted
         ;;
 
     "update")
         require_cmd curl
         case "$2" in
-            ""|"all"|"list")
-                echo "[*] Updating list-general.txt..."
-                if update_list_file; then
-                    _new_count=$(wc -l < "$GENERAL_LIST_FILE" 2>/dev/null || echo "?")
-                    log_event UPDATE "list-general.txt updated ($_new_count domains)"
-                    refresh_counts
-                    refresh_hostlists_if_running
-                else
-                    log_event ERROR "list-general.txt update failed"
-                    exit 1
-                fi
-                ;;
-            *)
-                echo "Usage: nzapret update [list]"
-                exit 1
-                ;;
+            ""|"all"|"list") ;;
+            *) die "Usage: nzapret update [list]" ;;
         esac
+        echo "[*] Updating list-general.txt..."
+        if ! update_general_list; then
+            log_event ERROR "list-general.txt update failed"
+            exit 1
+        fi
+        log_event UPDATE "list-general.txt updated ($(general_list_count 1) domains)"
+        refresh_hostlists_if_running
         ;;
 
     "status")
-        case "$2" in
-            "--json") print_status_json ;;
-            *)        print_status_human ;;
-        esac
+        if [ "$2" = "--json" ]; then
+            print_status_json
+        else
+            print_status_human
+        fi
         ;;
 
     "log")
-        _pid=$(get_first_pid)
-        _pid_count=$(get_pid_count)
-        if [ -n "$_pid" ] && [ -d "/proc/$_pid" ]; then
-            echo "nfqws2 is running (PID: $_pid)"
-            [ "$_pid_count" -gt 1 ] && echo "warning: multiple nfqws2 processes detected ($_pid_count)"
+        load_process_state
+        if [ -n "$PID" ]; then
+            echo "nfqws2 is running (PID: $PID)"
+            [ "$PID_COUNT" -gt 1 ] && echo "warning: multiple nfqws2 processes detected ($PID_COUNT)"
             echo "Cmdline:"
-            cat /proc/$_pid/cmdline 2>/dev/null | tr '\0' ' '
+            tr '\0' ' ' < "/proc/$PID/cmdline" 2>/dev/null
             echo ""
             echo ""
-            echo "Open files: $(ls /proc/$_pid/fd 2>/dev/null | wc -l)"
-            echo "Memory: $(grep VmRSS /proc/$_pid/status 2>/dev/null)"
+            echo "Open files: $(ls "/proc/$PID/fd" 2>/dev/null | wc -l)"
+            echo "Memory: $(grep VmRSS "/proc/$PID/status" 2>/dev/null)"
         else
             echo "nfqws2 is not running"
         fi
-
         echo ""
         echo "Last 50 lines of logs:"
         if [ -f "$LOGFILE" ]; then
@@ -1277,43 +804,36 @@ case "$1" in
     "profile")
         case "$2" in
             ""|"status")
-                print_profile_status
+                _pname=$(get_active_profile)
+                echo "Configuration preset: $_pname ($(get_profile_label "$_pname"))"
                 ;;
             "list")
                 list_profiles
                 ;;
             "set")
-                [ -n "$3" ] || {
-                    echo "Usage: nzapret profile set <name>"
-                    exit 1
-                }
+                [ -n "$3" ] || die "Usage: nzapret profile set <name>"
                 set_active_profile "$3"
                 log_event PROFILE "changed to $3 ($(get_profile_label "$3"))"
                 echo "[+] Configuration preset set to: $3"
                 echo "[*] Restart nzapret to apply changes"
                 ;;
             *)
-                echo "Usage: nzapret profile [status|list|set <name>]"
-                exit 1
+                die "Usage: nzapret profile [status|list|set <name>]"
                 ;;
         esac
         ;;
 
     "network")
         case "$2" in
-            ""|"status")
-                echo "Firewall stack: $(get_firewall_stack_label)"
-                if ipv6_network_available; then
-                    echo "IPv6 network: available"
-                else
-                    echo "IPv6 network: not available on current network"
-                fi
-                ;;
-            *)
-                echo "Usage: nzapret network [status]"
-                exit 1
-                ;;
+            ""|"status") ;;
+            *) die "Usage: nzapret network [status]" ;;
         esac
+        echo "Firewall stack: $(firewall_stack_label)"
+        if ipv6_network_available; then
+            echo "IPv6 network: available"
+        else
+            echo "IPv6 network: not available on current network"
+        fi
         ;;
 
     "dns")
@@ -1324,102 +844,70 @@ case "$1" in
             "set")
                 case "$3" in
                     "off")
-                        set_private_dns_mode_off || {
-                            echo "[-] Failed to disable Private DNS"
-                            exit 1
-                        }
+                        set_private_dns off || die "[-] Failed to disable Private DNS"
                         log_event DNS "Private DNS set to off"
                         echo "[+] Private DNS disabled"
                         ;;
                     "auto")
-                        set_private_dns_mode_auto || {
-                            echo "[-] Failed to switch Private DNS to automatic mode"
-                            exit 1
-                        }
+                        set_private_dns auto || die "[-] Failed to switch Private DNS to automatic mode"
                         log_event DNS "Private DNS set to automatic mode"
                         echo "[+] Private DNS set to Automatic"
                         ;;
-                    "default")
-                        set_private_dns_mode_hostname "$DEFAULT_PRIVATE_DNS_HOSTNAME" || {
-                            echo "[-] Failed to apply default Private DNS provider"
-                            exit 1
-                        }
-                        log_event DNS "Private DNS provider set to $DEFAULT_PRIVATE_DNS_HOSTNAME"
-                        echo "[+] Private DNS provider set to: $DEFAULT_PRIVATE_DNS_HOSTNAME"
-                        ;;
-                    "hostname")
-                        [ -n "$4" ] || {
-                            echo "Usage: nzapret dns set hostname <fqdn>"
-                            exit 1
-                        }
-                        _dns_host=$(normalize_private_dns_hostname "$4")
-                        is_valid_private_dns_hostname "$_dns_host" || {
-                            echo "[-] Invalid Private DNS hostname: $4"
-                            exit 1
-                        }
-                        set_private_dns_mode_hostname "$_dns_host" || {
-                            echo "[-] Failed to apply Private DNS hostname"
-                            exit 1
-                        }
+                    "default"|"hostname")
+                        if [ "$3" = "default" ]; then
+                            _dns_host="$DEFAULT_PRIVATE_DNS_HOSTNAME"
+                        else
+                            [ -n "$4" ] || die "Usage: nzapret dns set hostname <fqdn>"
+                            _dns_host=$(normalize_private_dns_hostname "$4")
+                            is_valid_private_dns_hostname "$_dns_host" || die "[-] Invalid Private DNS hostname: $4"
+                        fi
+                        set_private_dns hostname "$_dns_host" || die "[-] Failed to apply Private DNS hostname"
                         log_event DNS "Private DNS provider set to $_dns_host"
                         echo "[+] Private DNS provider set to: $_dns_host"
                         ;;
                     *)
-                        echo "Usage: nzapret dns status"
-                        echo "       nzapret dns set <off|auto|default>"
-                        echo "       nzapret dns set hostname <fqdn>"
-                        exit 1
+                        dns_usage
                         ;;
                 esac
                 ;;
             *)
-                echo "Usage: nzapret dns status"
-                echo "       nzapret dns set <off|auto|default>"
-                echo "       nzapret dns set hostname <fqdn>"
-                exit 1
+                dns_usage
                 ;;
         esac
         ;;
 
     "list-user")
-        case "$2" in
+        _cmd="$2"
+        case "$_cmd" in
+            "add"|"remove"|"replace")
+                shift 2
+                [ "$#" -gt 0 ] || die "Usage: nzapret list-user $_cmd <domain> [domain...]"
+                ;;
+        esac
+        case "$_cmd" in
             ""|"status")
                 print_user_list_status
                 ;;
             "show")
-                print_user_list_contents
+                if [ -f "$USER_LIST_FILE" ]; then
+                    cat "$USER_LIST_FILE"
+                fi
                 ;;
             "add")
-                shift 2
-                [ "$#" -gt 0 ] || {
-                    echo "Usage: nzapret list-user add <domain> [domain...]"
-                    exit 1
-                }
-                _added=$(append_user_list_entries "$@") || {
-                    echo "[-] Failed to update list-user.txt"
-                    exit 1
-                }
+                _added=$(update_user_list append "$@") || die "[-] Failed to update list-user.txt"
                 if [ "$_added" -eq 0 ]; then
                     echo "[*] list-user.txt already contains those domains"
                     exit 0
                 fi
-                _user_count=$(get_user_list_count)
+                _user_count=$(domain_count "$USER_LIST_FILE")
                 log_event USERLIST "added $_added domains ($_user_count total)"
                 echo "[+] Added $_added domains to list-user.txt ($_user_count total)"
                 refresh_hostlists_if_running
                 ;;
             "remove")
-                shift 2
-                [ "$#" -gt 0 ] || {
-                    echo "Usage: nzapret list-user remove <domain> [domain...]"
-                    exit 1
-                }
-                _before=$(get_user_list_count)
-                remove_user_list_entries "$@" || {
-                    echo "[-] Failed to update list-user.txt"
-                    exit 1
-                }
-                _after=$(get_user_list_count)
+                _before=$(domain_count "$USER_LIST_FILE")
+                remove_user_list_entries "$@" || die "[-] Failed to update list-user.txt"
+                _after=$(domain_count "$USER_LIST_FILE")
                 _removed=$((_before - _after))
                 if [ "$_removed" -le 0 ]; then
                     echo "[*] No matching domains found in list-user.txt"
@@ -1430,26 +918,15 @@ case "$1" in
                 refresh_hostlists_if_running
                 ;;
             "replace")
-                shift 2
-                [ "$#" -gt 0 ] || {
-                    echo "Usage: nzapret list-user replace <domain> [domain...]"
-                    exit 1
-                }
-                write_user_list_entries "$@" || {
-                    echo "[-] Failed to rewrite list-user.txt"
-                    exit 1
-                }
-                _user_count=$(get_user_list_count)
+                update_user_list replace "$@" >/dev/null || die "[-] Failed to rewrite list-user.txt"
+                _user_count=$(domain_count "$USER_LIST_FILE")
                 log_event USERLIST "replaced list-user.txt ($_user_count total)"
                 echo "[+] Saved list-user.txt ($_user_count domains)"
                 refresh_hostlists_if_running
                 ;;
             "clear")
-                _before=$(get_user_list_count)
-                : > "$USER_LIST_FILE" || {
-                    echo "[-] Failed to clear list-user.txt"
-                    exit 1
-                }
+                _before=$(domain_count "$USER_LIST_FILE")
+                : > "$USER_LIST_FILE" || die "[-] Failed to clear list-user.txt"
                 if [ "$_before" -gt 0 ]; then
                     echo "[+] list-user.txt cleared"
                     log_event USERLIST "cleared list-user.txt"
@@ -1459,17 +936,17 @@ case "$1" in
                 fi
                 ;;
             *)
-                echo "Usage: nzapret list-user [status|show|add <domain...>|remove <domain...>|replace <domain...>|clear]"
-                exit 1
+                die "Usage: nzapret list-user [status|show|add <domain...>|remove <domain...>|replace <domain...>|clear]"
                 ;;
         esac
         ;;
 
     "diagnose")
-        case "$2" in
-            "--json") run_diagnose_json ;;
-            *)        run_diagnose ;;
-        esac
+        if [ "$2" = "--json" ]; then
+            run_diagnose 1
+        else
+            run_diagnose
+        fi
         ;;
 
     "events")
@@ -1480,20 +957,19 @@ case "$1" in
         for _arg in "$@"; do
             case "$_arg" in
                 "clear"|"--clear") _evt_clear=1 ;;
-                --json) _evt_json=1 ;;
+                "--json") _evt_json=1 ;;
                 --tail=*) _evt_tail="${_arg#--tail=}" ;;
             esac
         done
         if [ "$_evt_clear" = "1" ]; then
-            : > "$EVENTLOG" || {
-                echo "[-] Failed to clear event log."
-                exit 1
-            }
+            : > "$EVENTLOG" || die "[-] Failed to clear event log."
             echo "[+] Event log cleared."
         elif [ "$_evt_json" = "1" ]; then
             print_events_json "$_evt_tail"
+        elif [ -f "$EVENTLOG" ]; then
+            tail -n "$_evt_tail" "$EVENTLOG"
         else
-            print_events_text "$_evt_tail"
+            echo "No events recorded yet."
         fi
         ;;
 
@@ -1507,113 +983,83 @@ case "$1" in
                 fi
                 ;;
             "link")
-                get_tg_link || {
-                    echo "[-] Failed to build link"
-                    exit 1
-                }
+                get_tg_link || die "[-] Failed to build link"
                 echo ""
                 ;;
             "open")
-                _tglink=$(get_tg_link) || {
-                    echo "[-] Failed to build link"
-                    exit 1
-                }
-                if am start -a android.intent.action.VIEW -d "$_tglink" >/dev/null 2>&1; then
-                    echo "[+] Opening Telegram..."
-                else
-                    echo "[-] Failed to launch Telegram"
-                    exit 1
-                fi
+                _tglink=$(get_tg_link) || die "[-] Failed to build link"
+                am start -a android.intent.action.VIEW -d "$_tglink" >/dev/null 2>&1 \
+                    || die "[-] Failed to launch Telegram"
+                echo "[+] Opening Telegram..."
                 ;;
             "regen-secret")
-                [ -f "$NZTG_BIN" ] || {
-                    echo "[-] nztg binary missing"
-                    exit 1
-                }
-                _newsec=$("$NZTG_BIN" gensecret 2>/dev/null) || {
-                    echo "[-] Failed to generate secret"
-                    exit 1
-                }
-                printf '%s\n' "$_newsec" > "$TG_SECRET_FILE" || {
-                    echo "[-] Failed to save secret"
-                    exit 1
-                }
-                chmod 600 "$TG_SECRET_FILE" 2>/dev/null
+                [ -f "$NZTG_BIN" ] || die "[-] nztg binary missing"
+                _newsec=$(write_tg_secret) || die "[-] Failed to generate secret"
                 log_event TGPROXY "secret regenerated"
                 echo "[+] New secret: $_newsec"
                 echo "[*] Restart nzapret to apply changes"
                 ;;
             "cf-test")
-                [ -f "$NZTG_BIN" ] || {
-                    echo "[-] nztg binary missing"
-                    exit 1
-                }
+                [ -f "$NZTG_BIN" ] || die "[-] nztg binary missing"
+                _json_flag="$3"
                 _cfd=$(get_tg_conf cf_domain "")
-                _json_arg=""
-                [ "$3" = "--json" ] && _json_arg="--json"
-                set --
-                [ -n "$_json_arg" ] && set -- "$_json_arg"
-                if [ -n "$_cfd" ]; then
-                    "$NZTG_BIN" cftest "$@" --domain "$_cfd"
-                else
-                    "$NZTG_BIN" cftest "$@"
-                fi
+                set -- cftest
+                [ "$_json_flag" = "--json" ] && set -- "$@" --json
+                [ -n "$_cfd" ] && set -- "$@" --domain "$_cfd"
+                "$NZTG_BIN" "$@"
                 ;;
             "set")
-                case "$3" in
+                _what="$3"
+                _val="$4"
+                case "$_what" in
                     "host")
-                        [ -n "$4" ] || { echo "Usage: nzapret tg set host <ip>"; exit 1; }
-                        tg_set_single host "$4" || { echo "[-] Failed to save"; exit 1; }
+                        case "$_val" in
+                            ""|*[[:space:]]*) die "Usage: nzapret tg set host <ip>" ;;
+                        esac
+                        set -- host "$_val"
                         ;;
                     "port")
-                        case "$4" in
-                            ''|*[!0-9]*) echo "[-] Port must be numeric"; exit 1 ;;
+                        case "$_val" in
+                            ''|*[!0-9]*) die "[-] Port must be numeric" ;;
                         esac
-                        tg_set_single port "$4" || { echo "[-] Failed to save"; exit 1; }
+                        set -- port "$_val"
                         ;;
                     "cf")
-                        case "$4" in
-                            on|1|true|enabled)  _cfv=1 ;;
-                            off|0|false|disabled) _cfv=0 ;;
-                            *) echo "Usage: nzapret tg set cf <on|off>"; exit 1 ;;
-                        esac
-                        tg_set_single cf_enabled "$_cfv" || { echo "[-] Failed to save"; exit 1; }
+                        _sw=$(parse_switch "$_val") || die "Usage: nzapret tg set cf <on|off>"
+                        set -- cf_enabled "$_sw"
                         ;;
                     "cf-domain")
-                        tg_set_single cf_domain "$4" || { echo "[-] Failed to save"; exit 1; }
+                        set -- cf_domain "$_val"
                         ;;
                     "preresolve")
-                        case "$4" in
-                            on|1|true|enabled)  _prev=1 ;;
-                            off|0|false|disabled) _prev=0 ;;
-                            *) echo "Usage: nzapret tg set preresolve <on|off>"; exit 1 ;;
-                        esac
-                        tg_set_single preresolve_enabled "$_prev" || { echo "[-] Failed to save"; exit 1; }
+                        _sw=$(parse_switch "$_val") || die "Usage: nzapret tg set preresolve <on|off>"
+                        set -- preresolve_enabled "$_sw"
                         ;;
                     "dc")
-                        _dcclean=$(printf '%s\n' "$4" | validate_tg_dc_rules) || {
-                            echo "[-] Invalid DC rules (expected 'number:IP' per line)"
-                            exit 1
-                        }
-                        tg_set_dc "$_dcclean" || { echo "[-] Failed to save"; exit 1; }
+                        _rules=$(printf '%s\n' "$_val" | validate_tg_dc_rules) \
+                            || die "[-] Invalid DC rules (expected 'number:IP' per line)"
+                        _old_ifs=$IFS
+                        IFS='
+'
+                        set -- dc $_rules
+                        IFS=$_old_ifs
                         ;;
                     *)
-                        echo "Usage: nzapret tg set <host|port|cf|cf-domain|preresolve|dc> <value>"
-                        exit 1
+                        die "Usage: nzapret tg set <host|port|cf|cf-domain|preresolve|dc> <value>"
                         ;;
                 esac
-                log_event TGPROXY "config updated ($3)"
+                tg_conf_set "$@" || die "[-] Failed to save"
+                log_event TGPROXY "config updated ($_what)"
                 echo "[+] Saved"
                 echo "[*] Restart nzapret to apply changes"
                 ;;
             *)
-                echo "Usage: nzapret tg [status [--json]|set <key> <value>|link|open|regen-secret|cf-test [--json]]"
-                exit 1
+                die "Usage: nzapret tg [status [--json]|set <key> <value>|link|open|regen-secret|cf-test [--json]]"
                 ;;
         esac
         ;;
 
-    "help"|"--help"|"-h"|*)
+    *)
         echo "nzapret Management Utility (Magisk)"
         echo "Usage: nzapret <command> [options]"
         echo ""
@@ -1628,6 +1074,7 @@ case "$1" in
         echo "  events                      - show event history"
         echo "  events clear                - clear the whole event log file"
         echo "  events --json [--tail=N]    - event history as JSON"
+        echo "  profile <subcommand>        - show, list or switch nfqws2 profiles"
         echo "  network status              - show the active IPv4/IPv6 firewall stack"
         echo "  dns <subcommand>            - manage Android Private DNS"
         echo "  list-user <subcommand>      - manage the personal domain hostlist"
@@ -1636,9 +1083,9 @@ case "$1" in
         echo "  diagnose --json             - diagnostics as JSON for WebUI"
         echo "  help                        - show this help message"
         echo ""
-        echo "Network commands: status"
+        echo "Profile commands: status, list, set <name>"
         echo "DNS commands: status, set <off|auto|default>, set hostname <fqdn>"
         echo "User list commands: status, show, add, remove, replace, clear"
-        echo "Telegram commands: status [--json], set <host|port|cf|cf-domain|dc>, link, open, regen-secret, cf-test"
+        echo "Telegram commands: status [--json], set <host|port|cf|cf-domain|preresolve|dc>, link, open, regen-secret, cf-test [--json]"
         ;;
 esac

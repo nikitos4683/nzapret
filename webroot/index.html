@@ -220,12 +220,12 @@
                 <div class="panel-head">
                     <div>
                         <div class="panel-title" data-i18n="private_dns.title">Private DNS</div>
-                        <div class="panel-subtitle" data-i18n-html="private_dns.subtitle_html">Управляйте системным Android Private DNS. При первом запуске службы nzapret инициализирует <code>xbox-dns.ru</code>, если на устройстве уже не настроен другой provider hostname.</div>
+                        <div class="panel-subtitle" data-i18n-html="private_dns.subtitle_html">Управляйте системным Android Private DNS. При первом запуске службы nzapret инициализирует <code>geohide.ru</code>, если на устройстве уже не настроен другой provider hostname.</div>
                     </div>
                 </div>
 
                 <div class="profile-slider-container">
-                    <div class="profile-slider network-mode-grid" id="privateDnsModeSlider">
+                    <div class="profile-slider private-dns-grid" id="privateDnsModeSlider">
                         <button class="profile-item private-dns-item" type="button" data-private-dns-mode="off" onclick="setPrivateDnsMode('off')">
                             <span class="profile-item-label" data-i18n="private_dns.off_label">Выкл</span>
                             <span class="profile-item-meta" data-i18n="private_dns.off_meta">Отключить Private DNS для системного Android resolver.</span>
@@ -235,7 +235,7 @@
                             <span class="profile-item-meta" data-i18n="private_dns.auto_meta">Пусть Android использует шифрованный DNS, когда текущая сеть его поддерживает.</span>
                         </button>
                         <button class="profile-item private-dns-item" type="button" data-private-dns-mode="default" onclick="setPrivateDnsDefault()">
-                            <span class="profile-item-label">xbox-dns.ru</span>
+                            <span class="profile-item-label">geohide.ru</span>
                             <span class="profile-item-meta" data-i18n="private_dns.default_meta">Сразу применить provider hostname по умолчанию для nzapret.</span>
                         </button>
                     </div>
@@ -261,7 +261,7 @@
                         <span class="diag-run-btn-icon" aria-hidden="true">
                             <svg viewBox="0 0 24 24"><path d="M12 3.25c.45 0 .86.24 1.07.63l8.27 15.2c.2.37.2.83-.02 1.19-.21.36-.6.58-1.02.58H3.7c-.42 0-.81-.22-1.02-.58-.22-.36-.22-.82-.02-1.19l8.27-15.2c.21-.39.62-.63 1.07-.63zm0 5.25a1.03 1.03 0 00-1.03 1.03v4.62a1.03 1.03 0 102.06 0V9.53A1.03 1.03 0 0012 8.5zm0 9.06a1.16 1.16 0 100-2.32 1.16 1.16 0 000 2.32z"/></svg>
                         </span>
-                        <span class="diag-run-btn-label" data-i18n="diagnostics.run">Запустить диагностику</span>
+                        <span class="diag-run-btn-label">Запустить диагностику</span>
                     </button>
                 </div>
 
@@ -289,7 +289,7 @@
                 <div class="panel-head">
                     <div>
                         <div class="panel-title" data-i18n="logs.title">Логи</div>
-                        <div class="panel-subtitle" id="logMeta" data-i18n="logs.runtime_meta">stdout / stderr nfqws2</div>
+                        <div class="panel-subtitle" id="logMeta">stdout / stderr nfqws2</div>
                     </div>
                     <div class="log-tabs">
                         <div class="log-tab-group">

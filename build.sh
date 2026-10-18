@@ -51,12 +51,11 @@ EXTRA_TEXT_FILES=(
     "META-INF/com/google/android/update-binary"
 )
 
+# Mutable runtime state that must never ship in the module ZIP.
 RUNTIME_ARTIFACTS=(
     ".list_count"
     ".private_dns_initialized"
-    ".list-user.install.bak"
-    ".tgproxy.conf.install.bak"
-    ".tg-secret.install.bak"
+    ".install-bak"
     ".tg_secret"
     ".tg_link"
     "tgproxy.conf"
@@ -134,7 +133,7 @@ remove_runtime_artifacts() {
     echo "[*] Removing runtime artifacts from staging tree..."
     # Do not ship logs, caches, or other mutable runtime state in the module ZIP.
     for artifact in "${RUNTIME_ARTIFACTS[@]}"; do
-        rm -f "$STAGE_DIR/$artifact"
+        rm -rf "${STAGE_DIR:?}/$artifact"
     done
 }
 
@@ -154,25 +153,9 @@ create_zip_archive() {
     rm -f "$ZIP_PATH"
 
     # Archive the staged contents, not the stage directory itself.
+    # Runtime artifacts are already gone from staging; only skip stray junk.
     cd "$STAGE_DIR"
-    zip -r9 "$ZIP_PATH" . \
-        -x "*.git*" \
-        -x ".list_count" \
-        -x ".private_dns_initialized" \
-        -x ".list-user.install.bak" \
-        -x ".tgproxy.conf.install.bak" \
-        -x ".tg-secret.install.bak" \
-        -x ".tg_secret" \
-        -x ".tg_link" \
-        -x "tgproxy.conf" \
-        -x "nzapret.log" \
-        -x "nzapret.log.prev" \
-        -x "nzapret-events.log" \
-        -x "nztg.log" \
-        -x "nztg.log.prev" \
-        -x "*.tmp" \
-        -x "Thumbs.db" \
-        -x ".DS_Store"
+    zip -r9 "$ZIP_PATH" . -x "*.git*" -x "*.tmp" -x "*Thumbs.db" -x "*.DS_Store"
     cd "$PROJECT_ROOT"
 }
 

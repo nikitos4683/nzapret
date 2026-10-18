@@ -1,68 +1,22 @@
 #!/system/bin/sh
 # nzapret — uninstall.sh
-# Called by Magisk during module removal.
-# Stops nfqws2 and wipes iptables chains.
+# Called by Magisk during module removal and by `nzapret stop`.
+# Stops nfqws2 and nztg, then wipes the iptables chains.
 
 MODDIR=${0%/*}
-IPT="iptables -w"
-IP6T="ip6tables -w"
-CHAIN="nzapret_out"
-LOGFILE="$MODDIR/nzapret.log"
-EVENTLOG="$MODDIR/nzapret-events.log"
-PROCESS_NAME="nfqws2"
 
-log() {
-    echo "[nzapret] $*" >> "$LOGFILE"
-}
+# Shared constants and helpers (logging, firewall cleanup).
+. "$MODDIR/common.sh"
 
-has_cmd() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-check_jump_rule() {
-    _tbl="$1"
-    _hook="$2"
-    $_tbl -t mangle -C "$_hook" -j "$CHAIN" >/dev/null 2>&1
-}
-
-# Remove every jump to the custom chain to stay idempotent across repeated stops.
-remove_jump_rules() {
-    _tbl="$1"
-    _hook="$2"
-    while check_jump_rule "$_tbl" "$_hook"; do
-        $_tbl -t mangle -D "$_hook" -j "$CHAIN" >/dev/null 2>&1
-    done
-}
-
-# Removes all jump rules in a loop to ensure no duplicates.
-cleanup_tables() {
-    remove_jump_rules "$IPT" OUTPUT
-    remove_jump_rules "$IPT" FORWARD
-    $IPT -t mangle -F "$CHAIN" >/dev/null 2>&1
-    $IPT -t mangle -X "$CHAIN" >/dev/null 2>&1
-
-    if has_cmd ip6tables; then
-        remove_jump_rules "$IP6T" OUTPUT
-        remove_jump_rules "$IP6T" FORWARD
-        $IP6T -t mangle -F "$CHAIN" >/dev/null 2>&1
-        $IP6T -t mangle -X "$CHAIN" >/dev/null 2>&1
-    fi
-}
-
-write_stop_event() {
-    _ts=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "----")
-    printf '%s %-8s %s\n' "$_ts" "STOP" "service stopped" >> "$EVENTLOG"
-}
-
-# Best-effort process stop first, then firewall cleanup below.
+# Best-effort process stop first, then firewall cleanup.
 killall "$PROCESS_NAME" 2>/dev/null
-killall "nztg" 2>/dev/null
+killall "$TG_PROCESS_NAME" 2>/dev/null
 
 if has_cmd iptables; then
     cleanup_tables
 else
-    log "iptables command missing, skipping firewall cleanup"
+    echo "[nzapret] iptables command missing, skipping firewall cleanup" >> "$LOGFILE"
 fi
 
-log "service uninstalled"
-write_stop_event
+echo "[nzapret] service stopped" >> "$LOGFILE"
+log_event STOP "service stopped"

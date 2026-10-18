@@ -17,7 +17,8 @@ export function esc(str) {
         .replace(/'/g, '&#39;');
 }
 
-export function parseUserListEntries(text) {
+// Split text into trimmed, non-empty, non-comment lines.
+export function parseLines(text) {
     return String(text || '')
         .replace(/\r/g, '')
         .split('\n')
@@ -25,23 +26,16 @@ export function parseUserListEntries(text) {
         .filter((line) => line && !line.startsWith('#'));
 }
 
-export function toComparableUserListText(value) {
-    return Array.isArray(value)
-        ? value.join('\n')
-        : parseUserListEntries(value).join('\n');
-}
-
-export function isValidPrivateDnsHostname(value) {
+// Mirrors is_valid_private_dns_hostname in common.sh.
+export function isValidHostname(value) {
     const host = String(value || '').trim().toLowerCase();
     if (!host || host.length > 253) return false;
     if (host.startsWith('.') || host.endsWith('.') || host.includes('..')) return false;
     if (!/^[a-z0-9.-]+$/.test(host)) return false;
 
     const labels = host.split('.');
-    if (labels.length < 2) return false;
-    return labels.every((label) =>
-        label.length > 0
-        && label.length <= 63
+    return labels.length >= 2 && labels.every((label) =>
+        label.length <= 63
         && !label.startsWith('-')
         && !label.endsWith('-')
     );
@@ -63,41 +57,27 @@ export function isPaneNearBottom(pane) {
     return pane.scrollHeight - pane.scrollTop - pane.clientHeight < LOG_BOTTOM_THRESHOLD;
 }
 
-function clampPaneScrollTop(pane, scrollTop) {
-    return Math.max(0, Math.min(scrollTop, pane.scrollHeight - pane.clientHeight));
+// Apply now and again on the next frame, after layout catches up with new content.
+function applyScrollTwice(pane, getScrollTop) {
+    const apply = () => {
+        pane.scrollTop = getScrollTop();
+    };
+    apply();
+    requestAnimationFrame(apply);
 }
 
 export function setPaneScrollTop(pane, scrollTop) {
-    const applyScroll = () => {
-        pane.scrollTop = clampPaneScrollTop(pane, scrollTop);
-    };
-
-    applyScroll();
-    requestAnimationFrame(applyScroll);
+    applyScrollTwice(pane, () => Math.max(0, Math.min(scrollTop, pane.scrollHeight - pane.clientHeight)));
 }
 
 export function scrollPaneToBottom(pane) {
-    const applyScroll = () => {
-        pane.scrollTop = pane.scrollHeight;
-    };
-
-    applyScroll();
-    requestAnimationFrame(applyScroll);
+    applyScrollTwice(pane, () => pane.scrollHeight);
 }
 
+// Replace a pane's text or HTML only when it changed; returns whether it did.
 export function updatePaneContent(pane, nextContent, options = {}) {
-    const { html = false } = options;
-    const currentContent = html ? pane.innerHTML : pane.textContent;
-
-    if (currentContent === nextContent) {
-        return false;
-    }
-
-    if (html) {
-        pane.innerHTML = nextContent;
-    } else {
-        pane.textContent = nextContent;
-    }
-
+    const prop = options.html ? 'innerHTML' : 'textContent';
+    if (pane[prop] === nextContent) return false;
+    pane[prop] = nextContent;
     return true;
 }

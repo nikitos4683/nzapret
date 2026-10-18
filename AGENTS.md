@@ -18,7 +18,7 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
 - `customize.sh`
   - Install-time extraction, architecture selection, binary rename, and permission setup.
 - `common.sh`
-  - Shared POSIX `sh` helpers sourced by `service.sh` and `system/bin/nzapret` (logging, network-mode, IPv6 detection, Private DNS, Android settings I/O). Sourced, not executed.
+  - Shared POSIX `sh` constants (module paths, chain/process names, defaults) and helpers sourced by `service.sh`, `uninstall.sh`, and `system/bin/nzapret`: logging, IPv6 detection, firewall teardown, profile lookup, Private DNS, Android settings I/O, Telegram proxy config. Sourced, not executed.
 - `service.sh`
   - Main runtime entrypoint for boot/manual start. Rebuilds firewall state and launches `nfqws2`.
 - `uninstall.sh`
@@ -94,9 +94,9 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
   - If you change IPv6 detection or network-mode behavior, update `service.sh`, `system/bin/nzapret`, WebUI status handling, diagnostics, and README together.
 
 - Preserve Android Private DNS semantics.
-  - The module default provider hostname is `xbox-dns.ru`.
+  - The module default provider hostname is `geohide.ru`.
   - `service.sh` initializes Private DNS only once, tracked by `.private_dns_initialized`.
-  - If Android is already in provider-hostname mode with a valid hostname, preserve it. Otherwise the first service start sets `xbox-dns.ru`.
+  - If Android is already in provider-hostname mode with a valid hostname, preserve it. Otherwise the first service start sets `geohide.ru`.
   - Manual CLI/WebUI DNS changes (`off`, `auto`, `default`, or custom `hostname`) mark Private DNS initialized and must not be overwritten on later starts.
   - Use Android global settings carefully: `private_dns_mode`, `private_dns_default_mode`, and `private_dns_specifier`. Android automatic mode is represented as `opportunistic`.
 
@@ -164,7 +164,7 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
 - Runtime state is generated inside the module directory.
   - `profiles/profile.current`, `.private_dns_initialized`, `.list_count`, `nzapret.log`, `nzapret.log.prev`, and `nzapret-events.log` are mutable artifacts.
   - Do not hardcode assumptions that these files are committed or always present in a fresh checkout.
-  - `customize.sh` preserves `lists/list-user.txt`, `tgproxy.conf`, and `.tg_secret` across module updates from both live and staged module directories.
+  - `customize.sh` preserves `lists/list-user.txt`, `tgproxy.conf`, `.tg_secret`, and `profiles/profile.current` (the `PRESERVED_FILES` list) across module updates from both live and staged module directories, via a temporary `.install-bak/` directory.
 
 - The update path is intentionally narrow.
   - `system/bin/nzapret update` refreshes `lists/list-general.txt` from the hardcoded upstream URL.
@@ -184,8 +184,9 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
 - Guard new external dependencies with `command -v` before use.
 - Keep log messages and failures actionable; the WebUI and CLI rely on them for debugging.
 - When changing cleanup or chain wiring, update verification logic everywhere it appears.
-- Shared, side-effect-free helpers (logging, network-mode, IPv6 availability, hostname validation, Private DNS, Android settings I/O) live in `common.sh`, sourced by both `service.sh` and `system/bin/nzapret`. Add new shared helpers there instead of duplicating them; keep file-specific behavior (e.g. `fail`/`require_cmd` error semantics, `ensure_*`) local to each script.
-- `common.sh` assumes the sourcing script has already defined the path constants it uses (`EVENTLOG`, `PRIVATE_DNS_INIT_FILE`, `DEFAULT_PRIVATE_DNS_HOSTNAME`). Source it after those constants. New top-level files like `common.sh` must be added to `build.sh` `MODULE_ENTRIES`.
+- Shared constants and helpers (module paths, logging, IPv6 availability, firewall teardown via `cleanup_tables`, profile lookup, hostname validation, Private DNS, Android settings I/O, Telegram proxy config) live in `common.sh`, sourced by `service.sh`, `uninstall.sh`, and `system/bin/nzapret`. Add new shared helpers there instead of duplicating them; keep file-specific behavior (e.g. `fail`/`require_cmd`/`die` error semantics, `ensure_runtime_layout`) local to each script.
+- `common.sh` derives every path from `MODDIR`, so the sourcing script must set `MODDIR` first and must not redefine the shared constants. New top-level files like `common.sh` must be added to `build.sh` `MODULE_ENTRIES`.
+- The CLI `diagnose` command builds both its human and `--json` output from one `diag` call per check; add new checks there once, with a `code`/`detail_code` pair and a matching `diagnostics.details.<code>.<detail_code>` translation in `webroot/i18n.js`.
 
 ### Profiles
 
@@ -219,7 +220,7 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
 - If you add a new executable script, update permission handling in `customize.sh`.
 - If you add a new text file type that must be normalized to LF before packaging, update `build.sh`.
 - Keep runtime artifacts out of the packaged ZIP, but preserve the shipped empty `lists/list-user.txt`.
-- `build.sh` must exclude generated runtime state such as `.private_dns_initialized`, `.list-user.install.bak`, logs, and `.list_count`.
+- `build.sh` must exclude generated runtime state such as `.private_dns_initialized`, the `.install-bak/` install-time backup directory, logs, and `.list_count`.
 - Every releasable `module.prop` version must have a matching `.github/release-notes/<version>.md` before running the release workflow.
 
 ## Verification Checklist

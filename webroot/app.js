@@ -3,13 +3,12 @@ import { CLI, MODDIR, matchJson, combineOutput } from './cli.js';
 import {
     esc,
     isPaneNearBottom,
-    isValidPrivateDnsHostname,
-    parseUserListEntries,
+    isValidHostname,
+    parseLines,
     scrollPaneToBottom,
     setButtonDisabled,
     setPaneScrollTop,
     shellQuote,
-    toComparableUserListText,
     updatePaneContent,
     waitForPaint
 } from './utils.js';
@@ -17,51 +16,34 @@ import {
     applyStaticTranslations,
     formatNumber,
     getLocale,
+    hasMessage,
     initializeLocale,
-    setLocale as setI18nLocale,
+    setLocale,
     t,
     tc
 } from './i18n.js';
 
 const LOG_POLL_MS = 3000;
 const EVENTS_POLL_MS = 5000;
+const TOAST_MS = 2500;
+const FALLBACK_DNS_HOSTNAME = 'geohide.ru';
 const PAGE_VIEWS = {
-    runtime: {
-        pageId: 'pageRuntime',
-        buttonId: 'btnPageRuntime'
-    },
-    tools: {
-        pageId: 'pageTools',
-        buttonId: 'btnPageTools'
-    },
-    logs: {
-        pageId: 'pageLogs',
-        buttonId: 'btnPageLogs'
-    }
+    runtime: { pageId: 'pageRuntime', buttonId: 'btnPageRuntime' },
+    tools: { pageId: 'pageTools', buttonId: 'btnPageTools' },
+    logs: { pageId: 'pageLogs', buttonId: 'btnPageLogs' }
 };
+// Text views tail a log file; the events view renders structured CLI output.
 const LOG_VIEWS = {
-    runtime: {
-        paneId: 'runtimeLogPane',
-        tabId: 'btnRuntimeTab'
-    },
-    nztg: {
-        paneId: 'nztgLogPane',
-        tabId: 'btnNztgTab'
-    },
-    events: {
-        paneId: 'eventsPane',
-        tabId: 'btnEventsTab'
-    }
+    runtime: { paneId: 'runtimeLogPane', tabId: 'btnRuntimeTab', file: 'nzapret.log', metaKey: 'logs.runtime_meta' },
+    nztg: { paneId: 'nztgLogPane', tabId: 'btnNztgTab', file: 'nztg.log', metaKey: 'logs.nztg_meta' },
+    events: { paneId: 'eventsPane', tabId: 'btnEventsTab' }
 };
-// Text-based log views (as opposed to the structured events view) and the file
-// each one tails.
-const TEXT_LOG_FILES = {
-    runtime: 'nzapret.log',
-    nztg: 'nztg.log'
+const RUNTIME_ACTIONS = {
+    start: { buttonId: 'btnStart', loadingKey: 'actions.starting' },
+    stop: { buttonId: 'btnStop', loadingKey: 'actions.stopping' },
+    restart: { buttonId: 'btnRestart', loadingKey: 'actions.restarting' },
+    update: { buttonId: 'btnUpdate', loadingKey: 'actions.updating_data' }
 };
-function isTextLog(view) {
-    return Object.prototype.hasOwnProperty.call(TEXT_LOG_FILES, view);
-}
 
 initializeLocale();
 
@@ -73,433 +55,352 @@ let statusRequestInFlight = false;
 let logRequestInFlight = false;
 let eventsRequestInFlight = false;
 const logState = {
-    runtime: {
-        text: '',
-        loaded: false,
-        scrolledUp: false
-    },
-    nztg: {
-        text: '',
-        loaded: false,
-        scrolledUp: false
-    },
-    events: {
-        items: [],
-        lastPayload: '',
-        scrolledUp: false
-    }
+    runtime: { text: '', loaded: false, scrolledUp: false },
+    nztg: { text: '', loaded: false, scrolledUp: false },
+    events: { items: [], lastPayload: '', scrolledUp: false }
 };
 let activePage = 'runtime';
 let activeLogView = 'runtime';
 let currentStatus = null;
 let statusViewState = 'checking';
 let userListEntries = [];
+let savedUserListEntries = [];
 let userListLoaded = false;
 let userListRequestInFlight = false;
-let userListSnapshot = '';
 let diagnosticsData = null;
 let diagnosticsExpanded = false;
 let privateDnsInputDirty = false;
 let tgConfig = null;
-let tgLoaded = false;
 let tgRequestInFlight = false;
 let tgSnapshot = null;
 let toastTimer = null;
 let toastState = null;
-let uiLockState = {
-    locked: false,
-    message: 'common.applying_changes',
-    params: {},
-    translate: true
-};
+let uiLockState = { locked: false, message: 'common.applying_changes', params: {} };
 
-function resolveMessage(message, params = {}, translate = true) {
-    return translate ? t(message, params) : String(message);
+const $ = (id) => document.getElementById(id);
+
+function setText(id, value) {
+    $(id).textContent = value;
 }
 
-function setUiLocked(locked, message = 'common.applying_changes', params = {}, translate = true) {
-    uiLockState = { locked, message, params, translate };
-
-    const overlay = document.getElementById('uiLock');
-    const text = document.getElementById('uiLockText');
-    text.textContent = resolveMessage(message, params, translate);
-    overlay.classList.toggle('active', locked);
-    document.body.classList.toggle('ui-busy', locked);
+function isTextLog(view) {
+    return Boolean(LOG_VIEWS[view].file);
 }
 
-function rerenderUiLock() {
-    if (!uiLockState.locked) return;
-    const text = document.getElementById('uiLockText');
-    text.textContent = resolveMessage(uiLockState.message, uiLockState.params, uiLockState.translate);
+function getLogPane(view) {
+    return $(LOG_VIEWS[view].paneId);
 }
 
-function getLogViewState(view = activeLogView) {
-    return logState[view];
+// ---- Overlay lock and toast ----
+function setUiLocked(locked, message = 'common.applying_changes', params = {}) {
+    uiLockState = { locked, message, params };
+    renderUiLock();
 }
 
-function getLogPane(view = activeLogView) {
-    return document.getElementById(LOG_VIEWS[view].paneId);
+function renderUiLock() {
+    setText('uiLockText', t(uiLockState.message, uiLockState.params));
+    $('uiLock').classList.toggle('active', uiLockState.locked);
+    document.body.classList.toggle('ui-busy', uiLockState.locked);
 }
 
-function isLogViewScrolledUp(view = activeLogView) {
-    const state = getLogViewState(view);
-    return Boolean(state && state.scrolledUp);
-}
-
-function setLogViewScrolledUp(view, scrolledUp) {
-    const state = getLogViewState(view);
-    if (!state) return;
-    state.scrolledUp = scrolledUp;
-}
-
-function syncLogPaneScroll(view, pane, previousScrollTop, options = {}) {
-    const { forceBottom = false } = options;
-    const shouldStickToBottom = forceBottom || isPaneNearBottom(pane) || !isLogViewScrolledUp(view);
-
-    if (shouldStickToBottom) {
-        scrollPaneToBottom(pane);
-        setLogViewScrolledUp(view, false);
-    } else {
-        setPaneScrollTop(pane, previousScrollTop);
+// Run `task` with the UI locked, then re-render both pages. Resolves to the
+// task's result, or undefined when another operation already holds the lock.
+async function withUiLock(loadingKey, loadingParams, task) {
+    if (isLoading) return undefined;
+    isLoading = true;
+    setUiLocked(true, loadingKey, loadingParams);
+    await waitForPaint();
+    try {
+        return await task();
+    } finally {
+        isLoading = false;
+        setUiLocked(false);
+        renderRuntimePageUi();
+        renderToolsPageUi();
     }
 }
 
-function showToast(message, params = {}, translate = true) {
-    const toast = document.getElementById('toast');
-    if (toastTimer) {
-        clearTimeout(toastTimer);
-    }
-
-    toastState = { message, params, translate };
-    toast.textContent = resolveMessage(message, params, translate);
-    toast.classList.add('show');
-
+function showToast(message, params = {}) {
+    if (toastTimer) clearTimeout(toastTimer);
+    toastState = { message, params };
+    renderToast();
+    $('toast').classList.add('show');
     toastTimer = setTimeout(() => {
-        toast.classList.remove('show');
+        $('toast').classList.remove('show');
         toastTimer = null;
         toastState = null;
-    }, 2500);
+    }, TOAST_MS);
 }
 
-function rerenderToast() {
-    if (!toastState) return;
-    const toast = document.getElementById('toast');
-    if (!toast.classList.contains('show')) return;
-    toast.textContent = resolveMessage(toastState.message, toastState.params, toastState.translate);
+function renderToast() {
+    if (toastState) setText('toast', t(toastState.message, toastState.params));
 }
 
+// ---- Status card ----
 function getPrivateDnsDefaultHostname(status = currentStatus) {
-    return status && status.private_dns_default_hostname
-        ? status.private_dns_default_hostname
-        : 'xbox-dns.ru';
-}
-
-function getStaticTranslationParams() {
-    return {
-        default_hostname: getPrivateDnsDefaultHostname(currentStatus)
-    };
-}
-
-function updateLocaleButtons() {
-    const locale = getLocale();
-    document.querySelectorAll('[data-locale]').forEach((button) => {
-        button.classList.toggle('active', button.dataset.locale === locale);
-    });
+    return (status && status.private_dns_default_hostname) || FALLBACK_DNS_HOSTNAME;
 }
 
 function getStatusLabel() {
     if (!currentStatus) {
-        return statusViewState === 'checking'
-            ? t('status.checking')
-            : t('status.error');
+        return t(statusViewState === 'checking' ? 'status.checking' : 'status.error');
     }
-
-    const pidCount = parseInt(currentStatus.pid_count || 0, 10);
-    if (currentStatus.active && pidCount > 1) {
-        return t('status.multi_pid');
-    }
-    return currentStatus.active
-        ? t('status.active')
-        : t('status.inactive');
+    if (!currentStatus.active) return t('status.inactive');
+    return parseInt(currentStatus.pid_count || 0, 10) > 1 ? t('status.multi_pid') : t('status.active');
 }
 
+// Mirrors the CLI's private_dns detail codes.
 function getPrivateDnsStatusCode(status = currentStatus) {
-    if (!status) {
-        return 'initial';
-    }
-
-    if (status.private_dns_available === false) {
-        return 'unavailable';
-    }
-
-    if (status.private_dns_mode === 'off') {
-        return 'off';
-    }
-
-    if (status.private_dns_mode === 'hostname') {
-        const hostname = status.private_dns_hostname || '';
-        const defaultHost = getPrivateDnsDefaultHostname(status);
-        if (!hostname) {
-            return 'hostname_unspecified';
-        }
-        return hostname === defaultHost ? 'hostname_default' : 'hostname_custom';
-    }
-
-    return 'auto';
+    if (!status) return 'initial';
+    if (status.private_dns_available === false) return 'unavailable';
+    if (status.private_dns_mode === 'off') return 'off';
+    if (status.private_dns_mode !== 'hostname') return 'auto';
+    if (!status.private_dns_hostname) return 'hostname_unspecified';
+    return status.private_dns_hostname === getPrivateDnsDefaultHostname(status) ? 'hostname_default' : 'hostname_custom';
 }
 
 function getPrivateDnsDisplayLabel(status = currentStatus) {
-    if (!status) {
-        return '--';
+    switch (getPrivateDnsStatusCode(status)) {
+        case 'initial': return '--';
+        case 'unavailable': return t('private_dns.unavailable_short');
+        case 'off': return t('private_dns.mode_off');
+        case 'auto': return t('private_dns.mode_auto');
+        default: return status.private_dns_hostname || t('private_dns.mode_provider');
     }
-
-    const code = getPrivateDnsStatusCode(status);
-    if (code === 'unavailable') {
-        return t('private_dns.unavailable_short');
-    }
-    if (code === 'off') {
-        return t('private_dns.mode_off');
-    }
-    if (code === 'auto') {
-        return t('private_dns.mode_auto');
-    }
-    if (status.private_dns_hostname) {
-        return status.private_dns_hostname;
-    }
-    return t('private_dns.mode_provider');
 }
 
 function getPrivateDnsNote(status = currentStatus) {
-    const code = getPrivateDnsStatusCode(status);
     const defaultHost = getPrivateDnsDefaultHostname(status);
-    const hostname = status && status.private_dns_hostname ? status.private_dns_hostname : defaultHost;
+    const hostname = (status && status.private_dns_hostname) || defaultHost;
 
-    switch (code) {
-        case 'unavailable':
-            return t('private_dns.status_unavailable');
-        case 'off':
-            return t('private_dns.status_off');
-        case 'hostname_default':
-            return t('private_dns.status_default_active', { hostname });
-        case 'hostname_custom':
-            return t('private_dns.status_custom_active', { hostname });
-        case 'hostname_unspecified':
-            return t('private_dns.status_custom_unspecified');
+    switch (getPrivateDnsStatusCode(status)) {
+        case 'unavailable': return t('private_dns.status_unavailable');
+        case 'off': return t('private_dns.status_off');
+        case 'hostname_default': return t('private_dns.status_default_active', { hostname });
+        case 'hostname_custom': return t('private_dns.status_custom_active', { hostname });
+        case 'hostname_unspecified': return t('private_dns.status_custom_unspecified');
         case 'auto':
-            if (status && status.private_dns_initialized === false) {
-                return t('private_dns.status_init_pending', { default_hostname: defaultHost });
-            }
-            return t('private_dns.status_auto');
-        default:
-            return t('private_dns.status_initial');
+            return status.private_dns_initialized === false
+                ? t('private_dns.status_init_pending', { default_hostname: defaultHost })
+                : t('private_dns.status_auto');
+        default: return t('private_dns.status_initial');
     }
 }
 
 function renderStatusCard() {
-    const card = document.getElementById('statusCard');
-    const dot = document.getElementById('statusDot');
-    const label = document.getElementById('statusLabel');
+    const status = currentStatus;
+    const isOn = Boolean(status && status.active);
+    const stateClass = isOn ? 'on' : 'off';
 
-    if (!currentStatus) {
-        document.getElementById('pidBadge').textContent = 'nfqws2 --';
-        document.getElementById('tgPidBadge').textContent = 'nztg --';
-        document.getElementById('privateDnsLabel').textContent = '--';
-        document.getElementById('tgStatusValue').textContent = '--';
-        document.getElementById('rulesV4').textContent = '?';
-        document.getElementById('rulesV6').textContent = '?';
-        document.getElementById('domainCount').textContent = '?';
-        document.getElementById('googleDomainCount').textContent = '?';
-        document.getElementById('userDomainCount').textContent = '?';
-        card.className = 'card status-card inactive';
-        dot.className = 'status-dot off';
-        label.className = 'status-label off';
-        label.textContent = getStatusLabel();
+    $('statusCard').className = `card status-card ${isOn ? 'active' : 'inactive'}`;
+    $('statusDot').className = `status-dot ${stateClass}`;
+    $('statusLabel').className = `status-label ${stateClass}`;
+    setText('statusLabel', getStatusLabel());
+
+    if (!status) {
+        setText('pidBadge', 'nfqws2 --');
+        setText('tgPidBadge', 'nztg --');
+        setText('privateDnsLabel', '--');
+        setText('tgStatusValue', '--');
+        ['rulesV4', 'rulesV6', 'domainCount', 'googleDomainCount', 'userDomainCount']
+            .forEach((id) => setText(id, '?'));
         return;
     }
 
-    const status = currentStatus;
-    const isOn = Boolean(status.active);
     const pid = status.pid || '--';
     const pidCount = parseInt(status.pid_count || 0, 10);
-
-    document.getElementById('version').textContent = status.version || t('common.unknown');
-    document.getElementById('pidBadge').textContent = pidCount > 1 ? `nfqws2 ${pid} +${pidCount - 1}` : `nfqws2 ${pid}`;
-    const tgPidBadge = document.getElementById('tgPidBadge');
-    tgPidBadge.textContent = `nztg ${status.tg_pid || '--'}`;
-    document.getElementById('privateDnsLabel').textContent = getPrivateDnsDisplayLabel(status);
-    if (status.tg_active) {
-        const port = status.tg_port || '1443';
-        const isCf = Boolean(status.tg_cf_enabled);
-        document.getElementById('tgStatusValue').textContent = isCf
-            ? t('status.tg_port_cf', { port })
-            : t('status.tg_port', { port });
-    } else {
-        document.getElementById('tgStatusValue').textContent = t('status.off');
-    }
-    document.getElementById('rulesV4').textContent = status.rules_v4 ?? 0;
-    document.getElementById('rulesV6').textContent = status.rules_v6 ?? 0;
-    document.getElementById('domainCount').textContent = formatNumber(status.domain_count ?? 0);
-    document.getElementById('googleDomainCount').textContent = formatNumber(status.google_domain_count ?? 0);
-    document.getElementById('userDomainCount').textContent = formatNumber(status.user_domain_count ?? 0);
-
-    card.className = 'card status-card ' + (isOn ? 'active' : 'inactive');
-    dot.className = 'status-dot ' + (isOn ? 'on' : 'off');
-    label.className = 'status-label ' + (isOn ? 'on' : 'off');
-    label.textContent = getStatusLabel();
+    setText('version', status.version || t('common.unknown'));
+    setText('pidBadge', pidCount > 1 ? `nfqws2 ${pid} +${pidCount - 1}` : `nfqws2 ${pid}`);
+    setText('tgPidBadge', `nztg ${status.tg_pid || '--'}`);
+    setText('privateDnsLabel', getPrivateDnsDisplayLabel(status));
+    setText('tgStatusValue', status.tg_active
+        ? t(status.tg_cf_enabled ? 'status.tg_port_cf' : 'status.tg_port', { port: status.tg_port || '1443' })
+        : t('status.off'));
+    setText('rulesV4', status.rules_v4 ?? 0);
+    setText('rulesV6', status.rules_v6 ?? 0);
+    setText('domainCount', formatNumber(status.domain_count ?? 0));
+    setText('googleDomainCount', formatNumber(status.google_domain_count ?? 0));
+    setText('userDomainCount', formatNumber(status.user_domain_count ?? 0));
 }
 
-function refreshStatusFromUiEvent() {
+function renderRuntimeActionButtons() {
     if (isLoading) return;
-    refreshStatus(true);
+    const isOn = Boolean(currentStatus && currentStatus.active);
+    $('btnStart').classList.toggle('disabled', isOn);
+    $('btnStop').classList.toggle('disabled', !isOn);
+    $('btnRestart').classList.toggle('disabled', !isOn);
+    $('btnUpdate').classList.remove('disabled');
 }
 
-function handleWebUiActivated() {
-    refreshStatusFromUiEvent();
-    refreshActivePageData({ forceUserList: true });
+function renderRuntimePageUi() {
+    renderStatusCard();
+    renderRuntimeActionButtons();
 }
 
+function renderToolsPageUi() {
+    renderPrivateDnsControls();
+    updateUserListEditorState();
+    renderTgCard();
+    renderDiagnoseButton();
+    renderDiagnosticsPanel();
+}
+
+async function refreshStatus(force = false) {
+    if ((!force && isLoading) || statusRequestInFlight) return;
+    statusRequestInFlight = true;
+
+    try {
+        const res = await exec(`${CLI} status --json`);
+        const payload = matchJson(res);
+        if (!payload) {
+            throw new Error(combineOutput(res) || 'status command failed');
+        }
+        currentStatus = JSON.parse(payload);
+        statusViewState = 'ready';
+        hasShownStatusError = false;
+        rerenderNonLogUi();
+    } catch (error) {
+        currentStatus = null;
+        statusViewState = 'unavailable';
+        renderRuntimePageUi();
+        renderToolsPageUi();
+        if (!hasShownStatusError) {
+            showToast('status.refresh_failed');
+            hasShownStatusError = true;
+        }
+        console.error('Status refresh error:', error);
+    } finally {
+        statusRequestInFlight = false;
+    }
+}
+
+async function runCli(args, options = {}) {
+    const {
+        loadingKey = 'common.applying_changes',
+        loadingParams = {},
+        successKey = '',
+        successParams = {},
+        refresh = true
+    } = options;
+
+    const result = await withUiLock(loadingKey, loadingParams, async () => {
+        try {
+            const res = await exec(`${CLI} ${args}`);
+            const output = combineOutput(res);
+            if (res.errno !== 0) {
+                showToast('generic.error_with_message', { message: output || args });
+                return { ok: false, output };
+            }
+            if (successKey) showToast(successKey, successParams);
+            if (refresh) await Promise.all([refreshStatus(true), refreshActiveLogView()]);
+            return { ok: true, output };
+        } catch (error) {
+            const message = error.message || String(error);
+            showToast('generic.error_with_message', { message });
+            return { ok: false, output: message };
+        }
+    });
+    return result || { ok: false, skipped: true };
+}
+
+async function doAction(command) {
+    const action = RUNTIME_ACTIONS[command];
+    const button = action ? $(action.buttonId) : null;
+    if (button && button.classList.contains('disabled')) return;
+    if (button) button.classList.add('loading');
+
+    await runCli(command, {
+        loadingKey: action ? action.loadingKey : 'common.applying_changes',
+        successKey: 'actions.completed',
+        successParams: { command: action ? t(`actions.${command}`) : command }
+    });
+
+    if (button) button.classList.remove('loading');
+}
+
+// ---- Private DNS ----
 function renderPrivateDnsControls(status = currentStatus) {
-    const note = document.getElementById('privateDnsNote');
-    const input = document.getElementById('privateDnsHostnameInput');
-    const applyButton = document.getElementById('btnApplyPrivateDnsHostname');
-    const buttons = document.querySelectorAll('[data-private-dns-mode]');
+    const note = $('privateDnsNote');
+    const input = $('privateDnsHostnameInput');
     const defaultHost = getPrivateDnsDefaultHostname(status);
-    const mode = status && status.private_dns_mode ? status.private_dns_mode : '';
-    const hostname = status && status.private_dns_hostname ? status.private_dns_hostname : '';
-    const controlsDisabled = isLoading || !status || status.private_dns_available === false;
+    const mode = (status && status.private_dns_mode) || '';
+    const hostname = (status && status.private_dns_hostname) || '';
+    const unavailable = Boolean(status && status.private_dns_available === false);
+    const controlsDisabled = isLoading || !status || unavailable;
+    const activeByMode = {
+        off: mode === 'off',
+        auto: mode === 'opportunistic',
+        default: mode === 'hostname' && hostname === defaultHost
+    };
 
-    if (note) {
-        note.textContent = getPrivateDnsNote(status);
-        note.classList.toggle('warning', Boolean(status && status.private_dns_available === false));
+    note.textContent = getPrivateDnsNote(status);
+    note.classList.toggle('warning', unavailable);
+
+    if (!privateDnsInputDirty && document.activeElement !== input) {
+        input.value = hostname || defaultHost;
     }
+    input.placeholder = defaultHost;
 
-    if (input) {
-        if (!privateDnsInputDirty && document.activeElement !== input) {
-            input.value = hostname || defaultHost;
-        }
-        input.placeholder = defaultHost;
-    }
-
-    buttons.forEach((button) => {
-        let active = false;
-        if (button.dataset.privateDnsMode === 'off') {
-            active = mode === 'off';
-        } else if (button.dataset.privateDnsMode === 'auto') {
-            active = mode === 'opportunistic';
-        } else if (button.dataset.privateDnsMode === 'default') {
-            active = mode === 'hostname' && hostname === defaultHost;
-        }
-        button.classList.toggle('active', active);
+    document.querySelectorAll('[data-private-dns-mode]').forEach((button) => {
+        button.classList.toggle('active', Boolean(activeByMode[button.dataset.privateDnsMode]));
         setButtonDisabled(button, controlsDisabled);
     });
+    setButtonDisabled($('btnApplyPrivateDnsHostname'), controlsDisabled || !isValidHostname(input.value));
+}
 
-    if (applyButton) {
-        const canApply = input && isValidPrivateDnsHostname(input.value);
-        setButtonDisabled(applyButton, controlsDisabled || !canApply);
+function canChangePrivateDns() {
+    return !isLoading && currentStatus && currentStatus.private_dns_available !== false;
+}
+
+async function applyPrivateDns(args, loadingKey, loadingParams = {}) {
+    const result = await runCli(`dns set ${args}`, {
+        loadingKey,
+        loadingParams,
+        successKey: 'private_dns.updated'
+    });
+    if (result.ok) {
+        privateDnsInputDirty = false;
+        renderPrivateDnsControls();
     }
 }
 
-function renderUserListPane() {
-    const pane = document.getElementById('userListPane');
-    if (!pane) return;
-
-    const busy = isLoading || userListRequestInFlight;
-    const savedEntries = new Set(parseUserListEntries(userListSnapshot));
-    if (!userListEntries.length) {
-        pane.classList.add('empty');
-        pane.innerHTML = `<div class="user-list-empty">${esc(t('user_list.empty'))}</div>`;
+async function setPrivateDnsMode(mode) {
+    if (!canChangePrivateDns()) return;
+    const currentMode = currentStatus.private_dns_mode || '';
+    if ((mode === 'off' && currentMode === 'off') || (mode === 'auto' && currentMode === 'opportunistic')) {
         return;
     }
-
-    pane.classList.remove('empty');
-    pane.innerHTML = userListEntries.map((domain) => `
-        <div class="user-list-item">
-            <div class="event-dot userlist ${savedEntries.has(domain) ? 'saved' : 'pending'}"></div>
-            <div class="event-body">
-                <div class="user-list-domain">${esc(domain)}</div>
-            </div>
-            <button
-                class="user-list-remove-btn${busy ? ' disabled' : ''}"
-                type="button"
-                data-remove-domain="${esc(domain)}"
-                aria-label="${esc(t('common.remove_domain'))}"
-                title="${esc(t('common.remove_domain'))}"
-                ${busy ? 'disabled' : ''}
-            >
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-            </button>
-        </div>
-    `).join('');
+    await applyPrivateDns(shellQuote(mode), mode === 'off' ? 'private_dns.loading_disable' : 'private_dns.loading_auto');
 }
 
-function updateUserListEditorState() {
-    const quickInput = document.getElementById('userListQuickInput');
-    if (!quickInput) return;
-
-    const entries = userListEntries.slice();
-    const comparableText = toComparableUserListText(entries);
-    const isDirty = comparableText !== userListSnapshot;
-    const hasPendingInput = Boolean(quickInput.value.trim());
-
-    document.getElementById('userListCountBadge').textContent = tc('counts.domains', entries.length);
-    document.getElementById('userListDirtyNote').textContent = isDirty ? t('user_list.dirty_unsaved') : t('user_list.dirty_none');
-    document.getElementById('userListDirtyNote').classList.toggle('warning', isDirty);
-
-    const note = document.getElementById('userListBindingNote');
-    const attached = currentStatus && typeof currentStatus.user_list_attached === 'boolean'
-        ? currentStatus.user_list_attached
-        : null;
-    if (attached === false) {
-        note.textContent = t('user_list.binding_missing');
-    } else if (attached === true) {
-        note.textContent = t('user_list.binding_applied');
-    } else {
-        note.textContent = t('user_list.binding_unknown');
+async function setPrivateDnsDefault() {
+    if (!canChangePrivateDns()) return;
+    const hostname = getPrivateDnsDefaultHostname();
+    if (currentStatus.private_dns_mode === 'hostname' && currentStatus.private_dns_hostname === hostname) {
+        return;
     }
-    note.classList.toggle('warning', attached === false);
-
-    const busy = isLoading || userListRequestInFlight;
-    renderUserListPane();
-    setButtonDisabled(document.getElementById('btnSaveUserList'), busy || !isDirty);
-    setButtonDisabled(document.getElementById('btnReloadUserList'), busy);
-    setButtonDisabled(document.getElementById('btnAddUserListDomain'), busy || !hasPendingInput);
+    await applyPrivateDns('default', 'private_dns.loading_default', { hostname });
 }
 
-// Lightweight handler for typing in the quick-add field: only the Add button
-// depends on the input, so avoid rebuilding the whole domain-list pane here.
-function updateUserListAddButton() {
-    const quickInput = document.getElementById('userListQuickInput');
-    if (!quickInput) return;
-    const busy = isLoading || userListRequestInFlight;
-    const hasPendingInput = Boolean(quickInput.value.trim());
-    setButtonDisabled(document.getElementById('btnAddUserListDomain'), busy || !hasPendingInput);
-}
+async function applyPrivateDnsHostname() {
+    if (!canChangePrivateDns()) return;
 
-function setupUserListEditor() {
-    const quickInput = document.getElementById('userListQuickInput');
-    const pane = document.getElementById('userListPane');
-    if (!quickInput || !pane || quickInput.dataset.bound === '1') return;
-    quickInput.dataset.bound = '1';
-    quickInput.addEventListener('input', updateUserListAddButton);
-    quickInput.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') {
-            event.preventDefault();
-            addUserListDomain();
-        }
-    });
-    pane.addEventListener('click', (event) => {
-        const button = event.target.closest('[data-remove-domain]');
-        if (!button) return;
-        removeUserListDomain(button.getAttribute('data-remove-domain') || '');
-    });
-    updateUserListEditorState();
+    const hostname = $('privateDnsHostnameInput').value.trim().toLowerCase();
+    if (!isValidHostname(hostname)) {
+        showToast('private_dns.invalid_hostname');
+        renderPrivateDnsControls();
+        return;
+    }
+    if (currentStatus.private_dns_mode === 'hostname' && currentStatus.private_dns_hostname === hostname) {
+        privateDnsInputDirty = false;
+        renderPrivateDnsControls();
+        return;
+    }
+    await applyPrivateDns(`hostname ${shellQuote(hostname)}`, 'private_dns.loading_hostname');
 }
 
 function setupPrivateDnsControls() {
-    const input = document.getElementById('privateDnsHostnameInput');
-    if (!input || input.dataset.bound === '1') return;
-
-    input.dataset.bound = '1';
+    const input = $('privateDnsHostnameInput');
     input.addEventListener('input', () => {
         privateDnsInputDirty = true;
         renderPrivateDnsControls();
@@ -516,746 +417,71 @@ function setupPrivateDnsControls() {
         }
         renderPrivateDnsControls();
     });
-
-    renderPrivateDnsControls();
 }
 
-function updatePageButtons() {
-    Object.entries(PAGE_VIEWS).forEach(([page, config]) => {
-        document.getElementById(config.buttonId).classList.toggle('active', activePage === page);
-    });
+// ---- Personal domain list ----
+function isUserListBusy() {
+    return isLoading || userListRequestInFlight;
 }
 
-function renderPages() {
-    Object.entries(PAGE_VIEWS).forEach(([page, config]) => {
-        document.getElementById(config.pageId).classList.toggle('active', activePage === page);
-    });
-    updatePageButtons();
-    syncLogPolling();
-}
+function renderUserListPane() {
+    const pane = $('userListPane');
+    const busy = isUserListBusy();
+    const saved = new Set(savedUserListEntries);
 
-async function setPage(page) {
-    activePage = page;
-    renderPages();
-    await refreshActivePageData();
-}
-
-function updateTabButtons() {
-    Object.entries(LOG_VIEWS).forEach(([view, config]) => {
-        document.getElementById(config.tabId).classList.toggle('active', activeLogView === view);
-    });
-}
-
-function updateLogMeta() {
-    const meta = document.getElementById('logMeta');
-    if (activeLogView === 'events') {
-        const count = getLogViewState('events').items.length;
-        meta.textContent = count ? tc('counts.events', count) : t('logs.event_history');
-    } else if (activeLogView === 'nztg') {
-        meta.textContent = t('logs.nztg_meta');
-    } else {
-        meta.textContent = t('logs.runtime_meta');
+    pane.classList.toggle('empty', !userListEntries.length);
+    if (!userListEntries.length) {
+        pane.innerHTML = `<div class="user-list-empty">${esc(t('user_list.empty'))}</div>`;
+        return;
     }
-}
 
-function updateStatusBar() {
-    const isLive = isTextLog(activeLogView) && logInterval !== null;
-    const clearButton = document.getElementById('btnClearEvents');
-    const jumpButton = document.getElementById('logJumpBtn');
-    document.getElementById('logLiveDot').hidden = !isLive;
-    document.getElementById('logLiveLabel').hidden = !isLive;
-    document.getElementById('logLiveSep').hidden = !isLive;
-
-    if (isTextLog(activeLogView)) {
-        const state = getLogViewState(activeLogView);
-        if (state.loaded) {
-            const lines = state.text ? state.text.split('\n').length : 0;
-            document.getElementById('logLineCount').textContent = tc('counts.lines', lines);
-        } else {
-            document.getElementById('logLineCount').textContent = '--';
-        }
-        clearButton.hidden = true;
-        jumpButton.classList.toggle('visible', isLogViewScrolledUp(activeLogView));
-    } else {
-        document.getElementById('logLineCount').textContent = tc('counts.entries', getLogViewState('events').items.length);
-        clearButton.hidden = false;
-        jumpButton.classList.remove('visible');
-    }
-}
-
-function renderEventsPane() {
-    const pane = getLogPane('events');
-    const previousScrollTop = pane.scrollTop;
-    const items = getLogViewState('events').items;
-    const markup = !items.length
-        ? `<div class="events-empty">${esc(t('logs.events_empty'))}</div>`
-        : items.map((evt) => {
-            const typeLower = (evt.type || '').toLowerCase();
-            return `<div class="event-item">
-            <div class="event-dot ${typeLower}"></div>
+    const removeLabel = esc(t('common.remove_domain'));
+    pane.innerHTML = userListEntries.map((domain) => `
+        <div class="user-list-item">
+            <div class="event-dot userlist ${saved.has(domain) ? 'saved' : 'pending'}"></div>
             <div class="event-body">
-                <div class="event-head">
-                    <span class="event-type">${esc(evt.type)}</span>
-                    <span class="event-time">${esc(evt.time ? evt.time.substring(11) : '')}</span>
-                </div>
-                <div class="event-msg">${esc(evt.message)}</div>
+                <div class="user-list-domain">${esc(domain)}</div>
             </div>
-        </div>`;
-        }).join('');
-    const changed = updatePaneContent(pane, markup, { html: true });
-
-    if (!items.length) {
-        setLogViewScrolledUp('events', false);
-        return;
-    }
-
-    if (!changed) {
-        return;
-    }
-
-    syncLogPaneScroll('events', pane, previousScrollTop);
-}
-
-function getDiagnoseButtonMarkup(label) {
-    return `
-        <span class="diag-run-btn-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M12 3.25c.45 0 .86.24 1.07.63l8.27 15.2c.2.37.2.83-.02 1.19-.21.36-.6.58-1.02.58H3.7c-.42 0-.81-.22-1.02-.58-.22-.36-.22-.82-.02-1.19l8.27-15.2c.21-.39.62-.63 1.07-.63zm0 5.25a1.03 1.03 0 00-1.03 1.03v4.62a1.03 1.03 0 102.06 0V9.53A1.03 1.03 0 0012 8.5zm0 9.06a1.16 1.16 0 100-2.32 1.16 1.16 0 000 2.32z"/></svg>
-        </span>
-        <span class="diag-run-btn-label">${esc(label)}</span>
-    `;
-}
-
-function setDiagnoseButtonState(button, label, loading = false) {
-    if (!button) return;
-    button.classList.toggle('loading', loading);
-    button.innerHTML = getDiagnoseButtonMarkup(label);
-}
-
-function rerenderDiagnoseButton() {
-    const button = document.getElementById('btnDiagnose');
-    if (!button) return;
-    const loading = button.classList.contains('loading');
-    setDiagnoseButtonState(button, t(loading ? 'diagnostics.running' : 'diagnostics.run'), loading);
-}
-
-function clearDiagnostics() {
-    diagnosticsData = null;
-    diagnosticsExpanded = false;
-    renderDiagnosticsPanel();
-}
-
-function toggleDiagnosticsDetails() {
-    if (!diagnosticsData) return;
-    diagnosticsExpanded = !diagnosticsExpanded;
-    renderDiagnosticsPanel();
-}
-
-function getLocalizedDiagnoseName(check) {
-    switch (check.code) {
-        case 'process':
-            return t('diagnostics.names.process', { subject: check.subject || 'nfqws2' });
-        case 'userlist_binding':
-            return t('diagnostics.names.userlist_binding');
-        case 'ip_stack':
-            return t('diagnostics.names.ip_stack');
-        case 'private_dns':
-            return t('diagnostics.names.private_dns');
-        case 'routing':
-            return check.family === 'ipv6'
-                ? t('diagnostics.names.routing_ipv6')
-                : t('diagnostics.names.routing_ipv4');
-        case 'jump_rule':
-            return check.table && check.hook ? `${check.table} ${check.hook}` : (check.name || '');
-        case 'command':
-        case 'ip6tables_runtime':
-        case 'runtime_file':
-            return check.subject || check.name || '';
-        default:
-            return check.name || '';
-    }
-}
-
-function getLocalizedDiagnoseDetail(check) {
-    switch (check.code) {
-        case 'command':
-            if (check.detail_code === 'available') return t('diagnostics.details.command_available');
-            if (check.detail_code === 'missing') return t('diagnostics.details.command_missing');
-            break;
-        case 'ip6tables_runtime':
-            if (check.detail_code === 'available') return t('diagnostics.details.ip6tables_available');
-            if (check.detail_code === 'unusable') return t('diagnostics.details.ip6tables_unusable');
-            if (check.detail_code === 'missing_fallback') return t('diagnostics.details.ip6tables_missing_fallback');
-            break;
-        case 'runtime_file':
-            if (check.detail_code === 'present') return t('diagnostics.details.runtime_file_present');
-            if (check.detail_code === 'missing') return t('diagnostics.details.runtime_file_missing');
-            break;
-        case 'process':
-            if (check.detail_code === 'running') return t('diagnostics.details.process_running', { pid: check.pid || '?' });
-            if (check.detail_code === 'not_running') return t('diagnostics.details.process_not_running');
-            break;
-        case 'userlist_binding':
-            if (check.detail_code === 'attached') return t('diagnostics.details.userlist_attached');
-            if (check.detail_code === 'detached') return t('diagnostics.details.userlist_detached');
-            break;
-        case 'ip_stack':
-            if (check.detail_code === 'ipv4_only') return t('diagnostics.details.stack_ipv4_only');
-            if (check.detail_code === 'dual_stack') return t('diagnostics.details.stack_dual');
-            break;
-        case 'private_dns':
-            if (check.detail_code === 'unavailable') return t('diagnostics.details.private_dns_unavailable');
-            if (check.detail_code === 'off') return t('diagnostics.details.private_dns_off');
-            if (check.detail_code === 'auto') return t('diagnostics.details.private_dns_auto');
-            if (check.detail_code === 'hostname_default') {
-                return t('diagnostics.details.private_dns_hostname_default', {
-                    hostname: check.hostname || check.default_hostname || getPrivateDnsDefaultHostname()
-                });
-            }
-            if (check.detail_code === 'hostname_custom') {
-                return t('diagnostics.details.private_dns_hostname_custom', {
-                    hostname: check.hostname || '?'
-                });
-            }
-            if (check.detail_code === 'hostname_unspecified') return t('diagnostics.details.private_dns_hostname_unspecified');
-            break;
-        case 'jump_rule':
-            if (check.detail_code === 'present') return t('diagnostics.details.jump_present');
-            if (check.detail_code === 'missing') return t('diagnostics.details.jump_missing');
-            if (check.detail_code === 'skipped_no_ipv6') return t('diagnostics.details.jump_skipped_no_ipv6');
-            break;
-        case 'routing':
-            if (check.detail_code === 'ok') return t('diagnostics.details.routing_ok');
-            if (check.detail_code === 'fail') return t('diagnostics.details.routing_fail');
-            if (check.detail_code === 'unavailable') return t('diagnostics.details.routing_unavailable');
-            break;
-        default:
-            break;
-    }
-
-    return check.detail || '';
-}
-
-function getLocalizedDiagnoseCheck(check) {
-    return {
-        status: check.status,
-        name: getLocalizedDiagnoseName(check),
-        detail: getLocalizedDiagnoseDetail(check)
-    };
-}
-
-function renderDiagnosticsPanel() {
-    const results = document.getElementById('diagResults');
-    const checklistShell = document.getElementById('diagChecklistShell');
-    const checklist = document.getElementById('diagChecklist');
-    const summary = document.getElementById('diagSummary');
-    const emptyState = document.getElementById('diagEmptyState');
-
-    if (!diagnosticsData) {
-        emptyState.hidden = false;
-        results.hidden = true;
-        checklistShell.hidden = true;
-        checklist.innerHTML = '';
-        summary.innerHTML = '';
-        return;
-    }
-
-    emptyState.hidden = true;
-
-    const counts = diagnosticsData.summary || { ok: 0, fail: 0, total: 0 };
-    const checks = (diagnosticsData.checks || []).map(getLocalizedDiagnoseCheck);
-    const toggleLabel = diagnosticsExpanded
-        ? t('diagnostics.hide_details')
-        : t('diagnostics.show_details', { count: formatNumber(checks.length) });
-
-    const passed = `<span class="pass-count">${esc(t('diagnostics.summary_passed', { ok: formatNumber(counts.ok) }))}</span>`;
-    const failed = `<span class="fail-count">${esc(t('diagnostics.summary_failed', { fail: formatNumber(counts.fail) }))}</span>`;
-    const summaryText = t('diagnostics.summary', { passed, failed, total: esc(formatNumber(counts.total)) });
-
-    summary.innerHTML = `
-        <div class="diag-summary-main">
-            <span class="diag-summary-text">${summaryText}</span>
-            <span class="diag-summary-note">${esc(diagnosticsExpanded ? t('diagnostics.expanded') : t('diagnostics.collapsed'))}</span>
+            <button
+                class="user-list-remove-btn${busy ? ' disabled' : ''}"
+                type="button"
+                data-remove-domain="${esc(domain)}"
+                aria-label="${removeLabel}"
+                title="${removeLabel}"
+                ${busy ? 'disabled' : ''}
+            >
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+            </button>
         </div>
-        <div class="diag-summary-actions">
-            <button class="diag-inline-btn" onclick="toggleDiagnosticsDetails()">${esc(toggleLabel)}</button>
-            <button class="diag-inline-btn" onclick="clearDiagnostics()">${esc(t('common.clear'))}</button>
-        </div>
-    `;
-
-    if (diagnosticsExpanded) {
-        checklist.innerHTML = checks.map((check) => `
-            <div class="diag-item">
-                <div class="diag-icon ${check.status}">${check.status === 'ok' ? '✓' : '✗'}</div>
-                <span class="diag-name">${esc(check.name)}</span>
-                <span class="diag-detail">${esc(check.detail)}</span>
-            </div>
-        `).join('');
-        checklistShell.hidden = false;
-    } else {
-        checklist.innerHTML = '';
-        checklistShell.hidden = true;
-    }
-
-    results.hidden = false;
+    `).join('');
 }
 
-async function refreshEvents() {
-    if (eventsRequestInFlight) return;
-    eventsRequestInFlight = true;
-    try {
-        const res = await exec(`${CLI} events --json --tail=50`);
-        const payload = matchJson(res, { array: true });
-        if (payload) {
-            const eventsState = getLogViewState('events');
-            if (payload === eventsState.lastPayload) {
-                return;
-            }
-            eventsState.items = JSON.parse(payload);
-            eventsState.lastPayload = payload;
-            if (activeLogView === 'events') {
-                renderEventsPane();
-                updateLogMeta();
-                updateStatusBar();
-            }
-        }
-    } catch (error) {
-        console.error('Events refresh error:', error);
-    } finally {
-        eventsRequestInFlight = false;
-    }
+// Only the Add button depends on the quick-add input, so typing does not
+// rebuild the whole domain pane.
+function updateUserListAddButton() {
+    const hasPendingInput = Boolean($('userListQuickInput').value.trim());
+    setButtonDisabled($('btnAddUserListDomain'), isUserListBusy() || !hasPendingInput);
 }
 
-function renderTextLog(view, options = {}) {
-    const { forceBottom = false } = options;
-    const pane = getLogPane(view);
-    const previousScrollTop = pane.scrollTop;
-    const state = getLogViewState(view);
-    const nextText = !state.loaded
-        ? t('logs.loading_runtime')
-        : (state.text || t('logs.runtime_empty'));
-    const changed = updatePaneContent(pane, nextText);
+function updateUserListEditorState() {
+    const isDirty = userListEntries.join('\n') !== savedUserListEntries.join('\n');
+    const attached = currentStatus && typeof currentStatus.user_list_attached === 'boolean'
+        ? currentStatus.user_list_attached
+        : null;
+    const bindingKey = attached === null
+        ? 'user_list.binding_unknown'
+        : (attached ? 'user_list.binding_applied' : 'user_list.binding_missing');
 
-    if (!changed && !forceBottom) {
-        return;
-    }
+    setText('userListCountBadge', tc('counts.domains', userListEntries.length));
+    setText('userListDirtyNote', t(isDirty ? 'user_list.dirty_unsaved' : 'user_list.dirty_none'));
+    $('userListDirtyNote').classList.toggle('warning', isDirty);
+    setText('userListBindingNote', t(bindingKey));
+    $('userListBindingNote').classList.toggle('warning', attached === false);
 
-    syncLogPaneScroll(view, pane, previousScrollTop, { forceBottom });
-}
-
-async function refreshTextLog(view) {
-    if (logRequestInFlight) return;
-    if (!isTextLog(view) || activeLogView !== view) return;
-
-    logRequestInFlight = true;
-    try {
-        const res = await exec(`tail -n 80 ${MODDIR}/${TEXT_LOG_FILES[view]} 2>/dev/null`);
-        const state = getLogViewState(view);
-        state.text = String(res.stdout || '').replace(/\r/g, '').trim();
-        state.loaded = true;
-        renderTextLog(view);
-        updateStatusBar();
-    } finally {
-        logRequestInFlight = false;
-    }
-}
-
-function setupScrollTracking() {
-    // Coalesce bursts of scroll events into a single per-frame DOM update so
-    // dragging the log panes stays smooth instead of thrashing layout.
-    let scrollFrame = null;
-    let pendingView = null;
-
-    function flushScroll() {
-        scrollFrame = null;
-        const view = pendingView;
-        pendingView = null;
-        if (!view) return;
-        const pane = getLogPane(view);
-        setLogViewScrolledUp(view, !isPaneNearBottom(pane));
-        updateStatusBar();
-    }
-
-    function onScroll(view) {
-        pendingView = view;
-        if (scrollFrame === null) {
-            scrollFrame = requestAnimationFrame(flushScroll);
-        }
-    }
-
-    Object.keys(LOG_VIEWS).forEach((view) => {
-        getLogPane(view).addEventListener('scroll', () => onScroll(view), { passive: true });
-    });
-}
-
-function jumpToBottom() {
-    const activePane = getLogPane(activeLogView);
-    scrollPaneToBottom(activePane);
-    setLogViewScrolledUp(activeLogView, false);
-    updateStatusBar();
-}
-
-function renderLogView() {
-    Object.entries(LOG_VIEWS).forEach(([view, config]) => {
-        document.getElementById(config.paneId).classList.toggle('active', activeLogView === view);
-    });
-    updateTabButtons();
-    updateLogMeta();
-    updateStatusBar();
-}
-
-function rerenderLogsUi() {
-    renderTextLog('runtime');
-    renderTextLog('nztg');
-    renderEventsPane();
-    renderLogView();
-}
-
-async function refreshToolsPageData(force = false) {
-    await loadUserList(force);
-    await loadTgConfig(force);
-}
-
-function syncLogPolling() {
-    if (activePage === 'logs' && isTextLog(activeLogView) && !document.hidden) {
-        startLogPolling();
-    } else {
-        stopLogPolling();
-    }
-
-    if (activePage === 'logs' && activeLogView === 'events' && !document.hidden) {
-        startEventsPolling();
-    } else {
-        stopEventsPolling();
-    }
-}
-
-async function refreshActiveLogView() {
-    if (activePage !== 'logs') return;
-
-    if (isTextLog(activeLogView)) {
-        if (!getLogViewState(activeLogView).loaded) {
-            renderTextLog(activeLogView, { forceBottom: true });
-        }
-        await refreshTextLog(activeLogView);
-    } else {
-        await refreshEvents();
-    }
-}
-
-async function refreshActivePageData(options = {}) {
-    const { forceUserList = false } = options;
-
-    if (activePage === 'tools') {
-        await refreshToolsPageData(forceUserList);
-        return;
-    }
-
-    if (activePage === 'logs') {
-        await refreshActiveLogView();
-    }
-}
-
-async function setLogView(view) {
-    activeLogView = view;
-    renderLogView();
-    syncLogPolling();
-    await refreshActiveLogView();
-}
-
-async function runDiagnose() {
-    const button = document.getElementById('btnDiagnose');
-    if (button.classList.contains('loading')) return;
-    setDiagnoseButtonState(button, t('diagnostics.running'), true);
-
-    try {
-        setUiLocked(true, 'diagnostics.overlay_running');
-        await waitForPaint();
-
-        const res = await exec(`${CLI} diagnose --json`);
-        const payload = matchJson(res);
-
-        if (!payload) {
-            showToast('diagnostics.failed');
-            return;
-        }
-
-        diagnosticsData = JSON.parse(payload);
-        diagnosticsExpanded = false;
-        renderDiagnosticsPanel();
-        showToast('diagnostics.completed');
-    } catch (error) {
-        showToast('diagnostics.error', { message: error.message });
-    } finally {
-        setDiagnoseButtonState(button, t('diagnostics.run'));
-        setUiLocked(false);
-    }
-}
-
-function renderRuntimeActionButtons(isOn) {
-    if (isLoading) return;
-
-    document.getElementById('btnStart').classList.toggle('disabled', isOn);
-    document.getElementById('btnStop').classList.toggle('disabled', !isOn);
-    document.getElementById('btnRestart').classList.toggle('disabled', !isOn);
-    document.getElementById('btnUpdate').classList.remove('disabled');
-}
-
-function renderRuntimePageUi(status = currentStatus) {
-    renderStatusCard();
-    renderRuntimeActionButtons(Boolean(status && status.active));
-}
-
-function renderToolsPageUi(status = currentStatus) {
-    renderPrivateDnsControls(status);
-    updateUserListEditorState();
-    renderTgCard();
-    rerenderDiagnoseButton();
-    renderDiagnosticsPanel();
-}
-
-function applyUnavailableState() {
-    currentStatus = null;
-    statusViewState = 'unavailable';
-    renderRuntimePageUi(null);
-    renderToolsPageUi(null);
-}
-
-async function runCli(args, options = {}) {
-    const {
-        loadingKey = 'common.applying_changes',
-        loadingParams = {},
-        successKey = '',
-        successParams = {},
-        refresh = true
-    } = options;
-
-    if (isLoading) return { ok: false, skipped: true };
-
-    isLoading = true;
-    setUiLocked(true, loadingKey, loadingParams);
-    await waitForPaint();
-
-    try {
-        const res = await exec(`${CLI} ${args}`);
-        const combined = combineOutput(res);
-        const ok = res.errno === 0;
-
-        if (ok) {
-            if (successKey) {
-                showToast(successKey, successParams);
-            }
-            if (refresh) {
-                await Promise.all([refreshStatus(true), refreshActiveLogView()]);
-            }
-        } else {
-            showToast('generic.error_with_message', {
-                message: combined || args
-            });
-        }
-
-        return { ok, output: combined };
-    } catch (error) {
-        showToast('generic.error_with_message', {
-            message: error.message || String(error)
-        });
-        return { ok: false, output: String(error.message || error) };
-    } finally {
-        isLoading = false;
-        setUiLocked(false);
-        renderRuntimePageUi();
-        renderToolsPageUi();
-    }
-}
-
-function startLogPolling() {
-    if (logInterval) clearInterval(logInterval);
-    logInterval = setInterval(() => {
-        if (!document.hidden) {
-            refreshTextLog(activeLogView);
-        }
-    }, LOG_POLL_MS);
-    updateStatusBar();
-}
-
-function stopLogPolling() {
-    if (logInterval) {
-        clearInterval(logInterval);
-        logInterval = null;
-    }
-    updateStatusBar();
-}
-
-function startEventsPolling() {
-    if (eventsInterval) return;
-    eventsInterval = setInterval(() => {
-        if (!document.hidden) {
-            refreshEvents();
-        }
-    }, EVENTS_POLL_MS);
-}
-
-function stopEventsPolling() {
-    if (eventsInterval) {
-        clearInterval(eventsInterval);
-        eventsInterval = null;
-    }
-}
-
-function rerenderBaseUi() {
-    applyStaticTranslations(document, getStaticTranslationParams());
-    updateLocaleButtons();
-    rerenderUiLock();
-    rerenderToast();
-}
-
-function rerenderNonLogUi() {
-    rerenderBaseUi();
-    renderRuntimePageUi();
-    renderToolsPageUi();
-}
-
-function rerenderAppUi() {
-    rerenderNonLogUi();
-    rerenderLogsUi();
-}
-
-async function refreshStatus(force = false) {
-    if ((!force && isLoading) || statusRequestInFlight) return;
-    statusRequestInFlight = true;
-
-    try {
-        const res = await exec(`${CLI} status --json`);
-        const payload = matchJson(res);
-
-        if (!payload) {
-            throw new Error(combineOutput(res) || 'status command failed');
-        }
-
-        currentStatus = JSON.parse(payload);
-        statusViewState = 'ready';
-        hasShownStatusError = false;
-        rerenderNonLogUi();
-    } catch (error) {
-        applyUnavailableState();
-        if (!hasShownStatusError) {
-            showToast('status.refresh_failed');
-            hasShownStatusError = true;
-        }
-        console.error('Status refresh error:', error);
-    } finally {
-        statusRequestInFlight = false;
-    }
-}
-
-function getActionLabel(command) {
-    switch (command) {
-        case 'start':
-            return t('actions.start');
-        case 'stop':
-            return t('actions.stop');
-        case 'restart':
-            return t('actions.restart');
-        case 'update':
-            return t('actions.update');
-        default:
-            return command;
-    }
-}
-
-async function doAction(command) {
-    const primary = command.split(' ')[0];
-    const buttonMap = {
-        start: 'btnStart',
-        stop: 'btnStop',
-        restart: 'btnRestart',
-        update: 'btnUpdate'
-    };
-    const loadingMap = {
-        start: 'actions.starting',
-        stop: 'actions.stopping',
-        restart: 'actions.restarting',
-        update: 'actions.updating_data'
-    };
-    const buttonId = buttonMap[primary];
-    const button = buttonId ? document.getElementById(buttonId) : null;
-
-    if (button && button.classList.contains('disabled')) return;
-    if (button) button.classList.add('loading');
-
-    await runCli(command, {
-        loadingKey: loadingMap[primary] || 'common.applying_changes',
-        successKey: 'actions.completed',
-        successParams: { command: getActionLabel(primary) }
-    });
-
-    if (button) button.classList.remove('loading');
-}
-
-async function setPrivateDnsMode(mode) {
-    if (isLoading || !currentStatus || currentStatus.private_dns_available === false) return;
-
-    const currentMode = currentStatus.private_dns_mode || '';
-    if ((mode === 'off' && currentMode === 'off')
-        || (mode === 'auto' && currentMode === 'opportunistic')) {
-        return;
-    }
-
-    const result = await runCli(`dns set ${shellQuote(mode)}`, {
-        loadingKey: mode === 'off' ? 'private_dns.loading_disable' : 'private_dns.loading_auto',
-        successKey: 'private_dns.updated'
-    });
-    if (result.ok) {
-        privateDnsInputDirty = false;
-        renderPrivateDnsControls(currentStatus);
-    }
-}
-
-async function setPrivateDnsDefault() {
-    if (isLoading || !currentStatus || currentStatus.private_dns_available === false) return;
-
-    const defaultHost = getPrivateDnsDefaultHostname(currentStatus);
-    if (currentStatus.private_dns_mode === 'hostname' && currentStatus.private_dns_hostname === defaultHost) {
-        return;
-    }
-
-    const result = await runCli('dns set default', {
-        loadingKey: 'private_dns.loading_default',
-        loadingParams: { hostname: defaultHost },
-        successKey: 'private_dns.updated'
-    });
-    if (result.ok) {
-        privateDnsInputDirty = false;
-        renderPrivateDnsControls(currentStatus);
-    }
-}
-
-async function applyPrivateDnsHostname() {
-    if (isLoading || !currentStatus || currentStatus.private_dns_available === false) return;
-
-    const input = document.getElementById('privateDnsHostnameInput');
-    if (!input) return;
-
-    const hostname = input.value.trim().toLowerCase();
-    if (!isValidPrivateDnsHostname(hostname)) {
-        showToast('private_dns.invalid_hostname');
-        renderPrivateDnsControls(currentStatus);
-        return;
-    }
-
-    if (currentStatus.private_dns_mode === 'hostname' && currentStatus.private_dns_hostname === hostname) {
-        privateDnsInputDirty = false;
-        renderPrivateDnsControls(currentStatus);
-        return;
-    }
-
-    const result = await runCli(`dns set hostname ${shellQuote(hostname)}`, {
-        loadingKey: 'private_dns.loading_hostname',
-        successKey: 'private_dns.updated'
-    });
-    if (result.ok) {
-        privateDnsInputDirty = false;
-        renderPrivateDnsControls(currentStatus);
-    }
+    renderUserListPane();
+    setButtonDisabled($('btnSaveUserList'), isUserListBusy() || !isDirty);
+    setButtonDisabled($('btnReloadUserList'), isUserListBusy());
+    updateUserListAddButton();
 }
 
 async function loadUserList(force = false) {
@@ -1272,13 +498,9 @@ async function loadUserList(force = false) {
         if (res.errno !== 0) {
             throw new Error(combineOutput(res) || 'list-user show failed');
         }
-        const raw = (res.stdout || '').replace(/\r/g, '');
-        const quickInput = document.getElementById('userListQuickInput');
-        userListEntries = parseUserListEntries(raw);
-        if (quickInput) {
-            quickInput.value = '';
-        }
-        userListSnapshot = toComparableUserListText(userListEntries);
+        userListEntries = parseLines(res.stdout);
+        savedUserListEntries = userListEntries.slice();
+        $('userListQuickInput').value = '';
         userListLoaded = true;
         return true;
     } catch (error) {
@@ -1292,26 +514,22 @@ async function loadUserList(force = false) {
 }
 
 async function reloadUserList() {
-    if (isLoading || userListRequestInFlight) return;
-    const loaded = await loadUserList(true);
-    if (loaded) {
+    if (isUserListBusy()) return;
+    if (await loadUserList(true)) {
         showToast('user_list.reloaded');
     }
 }
 
 function addUserListDomain() {
-    if (isLoading || userListRequestInFlight) return;
+    if (isUserListBusy()) return;
 
-    const quickInput = document.getElementById('userListQuickInput');
-    if (!quickInput) return;
-
+    const quickInput = $('userListQuickInput');
     const domain = quickInput.value.trim();
     if (!domain) return;
     if (domain.startsWith('#')) {
         showToast('user_list.comments_not_added');
         return;
     }
-
     if (userListEntries.includes(domain)) {
         showToast('user_list.already_exists');
         quickInput.select();
@@ -1326,101 +544,62 @@ function addUserListDomain() {
 }
 
 function removeUserListDomain(domain) {
-    if (isLoading || userListRequestInFlight || !domain) return;
-
-    const index = userListEntries.indexOf(domain);
-    if (index === -1) return;
-
-    userListEntries = [
-        ...userListEntries.slice(0, index),
-        ...userListEntries.slice(index + 1)
-    ];
+    if (isUserListBusy() || !userListEntries.includes(domain)) return;
+    userListEntries = userListEntries.filter((entry) => entry !== domain);
     updateUserListEditorState();
 }
 
 async function saveUserList() {
-    if (isLoading || userListRequestInFlight) return;
+    if (isUserListBusy()) return;
 
     const entries = userListEntries.slice();
-    const command = entries.length
-        ? `list-user replace ${entries.map(shellQuote).join(' ')}`
-        : 'list-user clear';
-
-    const result = await runCli(command, {
-        loadingKey: entries.length ? 'user_list.saving' : 'user_list.clearing',
-        successKey: entries.length ? 'user_list.saved' : 'user_list.cleared'
-    });
-
+    const result = await runCli(
+        entries.length ? `list-user replace ${entries.map(shellQuote).join(' ')}` : 'list-user clear',
+        {
+            loadingKey: entries.length ? 'user_list.saving' : 'user_list.clearing',
+            successKey: entries.length ? 'user_list.saved' : 'user_list.cleared'
+        }
+    );
     if (result.ok) {
         await loadUserList(true);
     }
 }
 
-async function clearEventsLog() {
-    if (activeLogView !== 'events' || isLoading) return;
-
-    const button = document.getElementById('btnClearEvents');
-    if (button.classList.contains('loading')) return;
-
-    button.classList.add('loading');
-
-    try {
-        setUiLocked(true, 'logs.clearing_events');
-        await waitForPaint();
-
-        const res = await exec(`${CLI} events clear`);
-        const ok = res.errno === 0;
-
-        if (!ok) {
-            throw new Error((res.stderr || res.stdout || 'events clear failed').trim());
+function setupUserListEditor() {
+    const quickInput = $('userListQuickInput');
+    quickInput.addEventListener('input', updateUserListAddButton);
+    quickInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            addUserListDomain();
         }
-
-        const eventsState = getLogViewState('events');
-        eventsState.items = [];
-        eventsState.lastPayload = '[]';
-        setLogViewScrolledUp('events', false);
-        renderEventsPane();
-        updateLogMeta();
-        updateStatusBar();
-        showToast('logs.cleared_events');
-        await refreshEvents();
-    } catch (error) {
-        showToast('logs.clear_failed', { message: error.message });
-    } finally {
-        button.classList.remove('loading');
-        setUiLocked(false);
-    }
+    });
+    $('userListPane').addEventListener('click', (event) => {
+        const button = event.target.closest('[data-remove-domain]');
+        if (button) removeUserListDomain(button.getAttribute('data-remove-domain') || '');
+    });
 }
 
 // ---- Telegram proxy (nztgproxy) ----
 function tgInputs() {
     return {
-        host: document.getElementById('tgHost'),
-        port: document.getElementById('tgPort'),
-        secret: document.getElementById('tgSecret'),
-        dc: document.getElementById('tgDc'),
-        cfEnabled: document.getElementById('tgCfEnabled'),
-        cfDomainEnabled: document.getElementById('tgCfDomainEnabled'),
-        cfDomain: document.getElementById('tgCfDomain'),
-        preResolve: document.getElementById('tgPreresolve')
+        host: $('tgHost'),
+        port: $('tgPort'),
+        secret: $('tgSecret'),
+        dc: $('tgDc'),
+        cfEnabled: $('tgCfEnabled'),
+        cfDomainEnabled: $('tgCfDomainEnabled'),
+        cfDomain: $('tgCfDomain'),
+        preResolve: $('tgPreresolve')
     };
-}
-
-function parseDcLines(text) {
-    return String(text || '')
-        .replace(/\r/g, '')
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line && !line.startsWith('#'));
 }
 
 function getTgDraft() {
     const el = tgInputs();
-    if (!el.host) return null;
     return {
         host: el.host.value.trim(),
         port: el.port.value.trim(),
-        dc: parseDcLines(el.dc.value),
+        dc: parseLines(el.dc.value),
         cfEnabled: el.cfEnabled.checked,
         cfDomain: el.cfDomainEnabled.checked ? el.cfDomain.value.trim() : '',
         preResolve: el.preResolve.checked
@@ -1428,37 +607,30 @@ function getTgDraft() {
 }
 
 function isTgDirty() {
-    if (tgSnapshot === null) return false;
-    const draft = getTgDraft();
-    return draft !== null && JSON.stringify(draft) !== tgSnapshot;
+    return tgSnapshot !== null && JSON.stringify(getTgDraft()) !== tgSnapshot;
 }
 
 function updateTgDirtyNote() {
     const el = tgInputs();
-    if (el.cfDomain && el.cfDomainEnabled) {
-        el.cfDomain.disabled = !el.cfDomainEnabled.checked;
-    }
-    const note = document.getElementById('tgDirtyNote');
-    const btn = document.getElementById('btnSaveTg');
     const dirty = isTgDirty();
-    if (note) note.textContent = dirty ? t('tg.dirty_pending') : t('tg.dirty_none');
-    if (btn) btn.classList.toggle('disabled', !dirty || isLoading);
+    el.cfDomain.disabled = !el.cfDomainEnabled.checked;
+    setText('tgDirtyNote', t(dirty ? 'tg.dirty_pending' : 'tg.dirty_none'));
+    setButtonDisabled($('btnSaveTg'), !dirty || isLoading);
 }
 
 function renderTgCard() {
-    const el = tgInputs();
-    if (!el.host || !tgConfig) return;
+    if (!tgConfig) return;
 
     // Preserve fields the user is editing; only repopulate when in sync.
-    if (tgSnapshot === null || !isTgDirty()) {
+    if (!isTgDirty()) {
+        const el = tgInputs();
         el.host.value = tgConfig.host || '';
         el.port.value = tgConfig.port || '';
         el.secret.value = tgConfig.secret || '';
         el.dc.value = (tgConfig.dc_redirects || []).join('\n');
         el.cfEnabled.checked = tgConfig.cf_enabled !== false;
-        const dom = tgConfig.cf_domain || '';
-        el.cfDomainEnabled.checked = Boolean(dom);
-        el.cfDomain.value = dom;
+        el.cfDomainEnabled.checked = Boolean(tgConfig.cf_domain);
+        el.cfDomain.value = tgConfig.cf_domain || '';
         el.preResolve.checked = tgConfig.preresolve_enabled !== false;
         tgSnapshot = JSON.stringify(getTgDraft());
     }
@@ -1467,17 +639,15 @@ function renderTgCard() {
 
 async function loadTgConfig(force = false) {
     if (tgRequestInFlight) return;
-    if (tgLoaded && !force) {
+    if (tgConfig && !force) {
         renderTgCard();
         return;
     }
     tgRequestInFlight = true;
     try {
-        const res = await exec(`${CLI} tg status --json`);
-        const payload = matchJson(res);
+        const payload = matchJson(await exec(`${CLI} tg status --json`));
         if (!payload) return;
         tgConfig = JSON.parse(payload);
-        tgLoaded = true;
         renderTgCard();
     } catch (error) {
         console.error('Telegram config load error:', error);
@@ -1486,48 +656,45 @@ async function loadTgConfig(force = false) {
     }
 }
 
-async function saveTgSettings() {
-    if (isLoading || !tgConfig || !isTgDirty()) return;
+// Returns an i18n error [key, params] for an invalid draft, or null.
+function validateTgDraft(draft) {
+    if (!draft.host || /\s/.test(draft.host)) return ['tg.invalid_host'];
+    const port = Number(draft.port);
+    if (!/^\d+$/.test(draft.port) || port < 1 || port > 65535) return ['tg.invalid_port'];
+    const badLine = draft.dc.find((line) => !/^\d+:\d{1,3}(\.\d{1,3}){3}$/.test(line));
+    if (badLine) return ['tg.invalid_dc', { line: badLine }];
+    if (draft.cfDomain && !isValidHostname(draft.cfDomain)) return ['tg.invalid_domain'];
+    return null;
+}
 
-    const draft = getTgDraft();
-    if (!draft) return;
-
-    if (!draft.host) {
-        showToast('tg.invalid_host');
-        return;
-    }
-    if (!/^\d+$/.test(draft.port) || Number(draft.port) < 1 || Number(draft.port) > 65535) {
-        showToast('tg.invalid_port');
-        return;
-    }
-    for (const line of draft.dc) {
-        if (!/^\d+:\d{1,3}(\.\d{1,3}){3}$/.test(line)) {
-            showToast('tg.invalid_dc', { line });
-            return;
-        }
-    }
-    if (draft.cfDomain && !isValidPrivateDnsHostname(draft.cfDomain)) {
-        showToast('tg.invalid_domain');
-        return;
-    }
-
-    const prev = tgConfig;
+// CLI `tg set` commands for the fields that differ from the loaded config.
+function getTgChangeCommands(draft, prev) {
+    const switchArg = (value) => (value ? 'on' : 'off');
     const cmds = [];
     if (draft.host !== prev.host) cmds.push(`tg set host ${shellQuote(draft.host)}`);
     if (draft.port !== String(prev.port)) cmds.push(`tg set port ${shellQuote(draft.port)}`);
     if (draft.dc.join('\n') !== (prev.dc_redirects || []).join('\n')) {
         cmds.push(`tg set dc ${shellQuote(draft.dc.join('\n'))}`);
     }
-    if (draft.cfEnabled !== (prev.cf_enabled !== false)) {
-        cmds.push(`tg set cf ${draft.cfEnabled ? 'on' : 'off'}`);
-    }
-    if (draft.cfDomain !== (prev.cf_domain || '')) {
-        cmds.push(`tg set cf-domain ${shellQuote(draft.cfDomain)}`);
-    }
+    if (draft.cfEnabled !== (prev.cf_enabled !== false)) cmds.push(`tg set cf ${switchArg(draft.cfEnabled)}`);
+    if (draft.cfDomain !== (prev.cf_domain || '')) cmds.push(`tg set cf-domain ${shellQuote(draft.cfDomain)}`);
     if (draft.preResolve !== (prev.preresolve_enabled !== false)) {
-        cmds.push(`tg set preresolve ${draft.preResolve ? 'on' : 'off'}`);
+        cmds.push(`tg set preresolve ${switchArg(draft.preResolve)}`);
+    }
+    return cmds;
+}
+
+async function saveTgSettings() {
+    if (isLoading || !tgConfig || !isTgDirty()) return;
+
+    const draft = getTgDraft();
+    const invalid = validateTgDraft(draft);
+    if (invalid) {
+        showToast(...invalid);
+        return;
     }
 
+    const cmds = getTgChangeCommands(draft, tgConfig);
     if (!cmds.length) {
         tgSnapshot = JSON.stringify(draft);
         updateTgDirtyNote();
@@ -1535,30 +702,20 @@ async function saveTgSettings() {
     }
 
     const shouldRestart = Boolean(currentStatus && currentStatus.active);
-    isLoading = true;
-    setUiLocked(true, shouldRestart ? 'tg.saving_restart' : 'tg.saving');
-    await waitForPaint();
-
     try {
-        for (const cmd of cmds) {
-            const res = await exec(`${CLI} ${cmd}`);
-            if (res.errno !== 0) throw new Error(combineOutput(res) || cmd);
-        }
-        if (shouldRestart) {
-            const res = await exec(`${CLI} restart`);
-            if (res.errno !== 0) throw new Error(combineOutput(res) || 'restart failed');
-        }
-        tgSnapshot = null;
-        await loadTgConfig(true);
-        await Promise.all([refreshStatus(true), refreshActiveLogView()]);
-        showToast(shouldRestart ? 'tg.saved_restart' : 'tg.saved');
+        await withUiLock(shouldRestart ? 'tg.saving_restart' : 'tg.saving', {}, async () => {
+            if (shouldRestart) cmds.push('restart');
+            for (const cmd of cmds) {
+                const res = await exec(`${CLI} ${cmd}`);
+                if (res.errno !== 0) throw new Error(combineOutput(res) || cmd);
+            }
+            tgSnapshot = null;
+            await loadTgConfig(true);
+            await Promise.all([refreshStatus(true), refreshActiveLogView()]);
+            showToast(shouldRestart ? 'tg.saved_restart' : 'tg.saved');
+        });
     } catch (error) {
         showToast('generic.error_with_message', { message: error.message });
-    } finally {
-        isLoading = false;
-        setUiLocked(false);
-        renderRuntimePageUi();
-        renderToolsPageUi();
     }
 }
 
@@ -1566,16 +723,9 @@ async function regenerateTgSecret() {
     if (isLoading) return;
     const shouldRestart = Boolean(currentStatus && currentStatus.active);
 
-    const res = await runCli('tg regen-secret', {
-        loadingKey: 'tg.regenerating',
-        refresh: false
-    });
-    if (!res.ok) return;
+    if (!(await runCli('tg regen-secret', { loadingKey: 'tg.regenerating', refresh: false })).ok) return;
+    if (shouldRestart && !(await runCli('restart', { loadingKey: 'tg.saving_restart', refresh: false })).ok) return;
 
-    if (shouldRestart) {
-        const rr = await runCli('restart', { loadingKey: 'tg.saving_restart', refresh: false });
-        if (!rr.ok) return;
-    }
     tgSnapshot = null;
     await loadTgConfig(true);
     await refreshStatus(true);
@@ -1584,38 +734,29 @@ async function regenerateTgSecret() {
 
 async function testCfProxy() {
     if (isLoading) return;
-    const btn = document.getElementById('btnTgCfTest');
-    if (btn) btn.classList.add('loading');
+    const button = $('btnTgCfTest');
+    button.classList.add('loading');
     try {
-        setUiLocked(true, 'tg.cf_testing');
-        await waitForPaint();
-        const res = await exec(`${CLI} tg cf-test --json`);
-        const payload = matchJson(res);
-        if (payload) {
-            const result = JSON.parse(payload);
+        await withUiLock('tg.cf_testing', {}, async () => {
+            const res = await exec(`${CLI} tg cf-test --json`);
+            const payload = matchJson(res);
+            const result = payload ? JSON.parse(payload) : { ok: false, error: combineOutput(res) };
             if (result.ok) {
                 showToast('tg.cf_test_ok', { domain: result.domain });
             } else {
                 showToast('tg.cf_test_fail', { error: result.error || '' });
             }
-        } else {
-            showToast('tg.cf_test_fail', { error: combineOutput(res) });
-        }
+        });
     } catch (error) {
         showToast('tg.cf_test_fail', { error: error.message });
     } finally {
-        if (btn) btn.classList.remove('loading');
-        setUiLocked(false);
+        button.classList.remove('loading');
     }
 }
 
 async function openInTelegram() {
     if (isLoading) return;
-    await runCli('tg open', {
-        loadingKey: 'tg.opening',
-        successKey: 'tg.opened',
-        refresh: false
-    });
+    await runCli('tg open', { loadingKey: 'tg.opening', successKey: 'tg.opened', refresh: false });
 }
 
 async function copyTgLink() {
@@ -1642,63 +783,450 @@ async function copyTgLink() {
 
 function setupTgCard() {
     ['tgHost', 'tgPort', 'tgDc', 'tgCfDomain'].forEach((id) => {
-        const el = document.getElementById(id);
-        if (el && el.dataset.bound !== '1') {
-            el.dataset.bound = '1';
-            el.addEventListener('input', updateTgDirtyNote);
-        }
+        $(id).addEventListener('input', updateTgDirtyNote);
     });
-    ['tgCfEnabled', 'tgCfDomainEnabled'].forEach((id) => {
-        const el = document.getElementById(id);
-        if (el && el.dataset.bound !== '1') {
-            el.dataset.bound = '1';
-            el.addEventListener('change', updateTgDirtyNote);
-        }
+    ['tgCfEnabled', 'tgCfDomainEnabled', 'tgPreresolve'].forEach((id) => {
+        $(id).addEventListener('change', updateTgDirtyNote);
     });
 }
 
-function changeLocale(locale) {
-    setI18nLocale(locale);
-    rerenderAppUi();
+// ---- Diagnostics ----
+function renderDiagnoseButton() {
+    const button = $('btnDiagnose');
+    const loading = button.classList.contains('loading');
+    button.querySelector('.diag-run-btn-label').textContent = t(loading ? 'diagnostics.running' : 'diagnostics.run');
+}
+
+function setDiagnoseButtonLoading(loading) {
+    $('btnDiagnose').classList.toggle('loading', loading);
+    renderDiagnoseButton();
+}
+
+function clearDiagnostics() {
+    diagnosticsData = null;
+    diagnosticsExpanded = false;
+    renderDiagnosticsPanel();
+}
+
+function toggleDiagnosticsDetails() {
+    if (!diagnosticsData) return;
+    diagnosticsExpanded = !diagnosticsExpanded;
+    renderDiagnosticsPanel();
+}
+
+function getLocalizedDiagnoseName(check) {
+    switch (check.code) {
+        case 'process':
+            return t('diagnostics.names.process', { subject: check.subject || 'nfqws2' });
+        case 'routing':
+            return t(check.family === 'ipv6' ? 'diagnostics.names.routing_ipv6' : 'diagnostics.names.routing_ipv4');
+        case 'userlist_binding':
+        case 'ip_stack':
+        case 'private_dns':
+            return t(`diagnostics.names.${check.code}`);
+        case 'jump_rule':
+            return check.table && check.hook ? `${check.table} ${check.hook}` : (check.name || '');
+        default:
+            return check.subject || check.name || '';
+    }
+}
+
+// Translations are keyed by the CLI's code/detail_code; unknown pairs fall
+// back to the CLI's English detail text.
+function getLocalizedDiagnoseDetail(check) {
+    const key = `diagnostics.details.${check.code}.${check.detail_code}`;
+    if (!check.code || !check.detail_code || !hasMessage(key)) {
+        return check.detail || '';
+    }
+    return t(key, {
+        pid: check.pid || '?',
+        hostname: check.hostname || check.default_hostname || getPrivateDnsDefaultHostname()
+    });
+}
+
+function renderDiagnosticsPanel() {
+    const results = $('diagResults');
+    const checklistShell = $('diagChecklistShell');
+    const checklist = $('diagChecklist');
+    const summary = $('diagSummary');
+
+    $('diagEmptyState').hidden = Boolean(diagnosticsData);
+    results.hidden = !diagnosticsData;
+    if (!diagnosticsData) {
+        checklistShell.hidden = true;
+        checklist.innerHTML = '';
+        summary.innerHTML = '';
+        return;
+    }
+
+    const counts = diagnosticsData.summary || { ok: 0, fail: 0, total: 0 };
+    const checks = diagnosticsData.checks || [];
+    const toggleLabel = diagnosticsExpanded
+        ? t('diagnostics.hide_details')
+        : t('diagnostics.show_details', { count: formatNumber(checks.length) });
+    const passed = `<span class="pass-count">${esc(t('diagnostics.summary_passed', { ok: formatNumber(counts.ok) }))}</span>`;
+    const failed = `<span class="fail-count">${esc(t('diagnostics.summary_failed', { fail: formatNumber(counts.fail) }))}</span>`;
+    const summaryText = t('diagnostics.summary', { passed, failed, total: esc(formatNumber(counts.total)) });
+
+    summary.innerHTML = `
+        <div class="diag-summary-main">
+            <span class="diag-summary-text">${summaryText}</span>
+            <span class="diag-summary-note">${esc(t(diagnosticsExpanded ? 'diagnostics.expanded' : 'diagnostics.collapsed'))}</span>
+        </div>
+        <div class="diag-summary-actions">
+            <button class="diag-inline-btn" onclick="toggleDiagnosticsDetails()">${esc(toggleLabel)}</button>
+            <button class="diag-inline-btn" onclick="clearDiagnostics()">${esc(t('common.clear'))}</button>
+        </div>
+    `;
+
+    checklistShell.hidden = !diagnosticsExpanded;
+    checklist.innerHTML = !diagnosticsExpanded ? '' : checks.map((check) => `
+        <div class="diag-item">
+            <div class="diag-icon ${check.status}">${check.status === 'ok' ? '✓' : '✗'}</div>
+            <span class="diag-name">${esc(getLocalizedDiagnoseName(check))}</span>
+            <span class="diag-detail">${esc(getLocalizedDiagnoseDetail(check))}</span>
+        </div>
+    `).join('');
+}
+
+async function runDiagnose() {
+    if (isLoading || $('btnDiagnose').classList.contains('loading')) return;
+    setDiagnoseButtonLoading(true);
+
+    try {
+        await withUiLock('diagnostics.overlay_running', {}, async () => {
+            const payload = matchJson(await exec(`${CLI} diagnose --json`));
+            if (!payload) {
+                showToast('diagnostics.failed');
+                return;
+            }
+            diagnosticsData = JSON.parse(payload);
+            diagnosticsExpanded = false;
+            showToast('diagnostics.completed');
+        });
+    } catch (error) {
+        showToast('diagnostics.error', { message: error.message });
+    } finally {
+        setDiagnoseButtonLoading(false);
+        renderDiagnosticsPanel();
+    }
+}
+
+// ---- Logs ----
+function syncLogPaneScroll(view, pane, previousScrollTop, forceBottom = false) {
+    const state = logState[view];
+    if (forceBottom || isPaneNearBottom(pane) || !state.scrolledUp) {
+        scrollPaneToBottom(pane);
+        state.scrolledUp = false;
+    } else {
+        setPaneScrollTop(pane, previousScrollTop);
+    }
+}
+
+function updateLogMeta() {
+    const meta = $('logMeta');
+    if (isTextLog(activeLogView)) {
+        meta.textContent = t(LOG_VIEWS[activeLogView].metaKey);
+    } else {
+        const count = logState.events.items.length;
+        meta.textContent = count ? tc('counts.events', count) : t('logs.event_history');
+    }
+}
+
+function updateStatusBar() {
+    const textView = isTextLog(activeLogView);
+    const isLive = textView && logInterval !== null;
+    ['logLiveDot', 'logLiveLabel', 'logLiveSep'].forEach((id) => {
+        $(id).hidden = !isLive;
+    });
+    $('btnClearEvents').hidden = textView;
+
+    if (textView) {
+        const state = logState[activeLogView];
+        const lines = state.text ? state.text.split('\n').length : 0;
+        setText('logLineCount', state.loaded ? tc('counts.lines', lines) : '--');
+        $('logJumpBtn').classList.toggle('visible', state.scrolledUp);
+    } else {
+        setText('logLineCount', tc('counts.entries', logState.events.items.length));
+        $('logJumpBtn').classList.remove('visible');
+    }
+}
+
+function renderEventsPane() {
+    const pane = getLogPane('events');
+    const previousScrollTop = pane.scrollTop;
+    const { items } = logState.events;
+    const markup = !items.length
+        ? `<div class="events-empty">${esc(t('logs.events_empty'))}</div>`
+        : items.map((evt) => `<div class="event-item">
+            <div class="event-dot ${esc((evt.type || '').toLowerCase())}"></div>
+            <div class="event-body">
+                <div class="event-head">
+                    <span class="event-type">${esc(evt.type)}</span>
+                    <span class="event-time">${esc(evt.time ? evt.time.substring(11) : '')}</span>
+                </div>
+                <div class="event-msg">${esc(evt.message)}</div>
+            </div>
+        </div>`).join('');
+    const changed = updatePaneContent(pane, markup, { html: true });
+
+    if (!items.length) {
+        logState.events.scrolledUp = false;
+    } else if (changed) {
+        syncLogPaneScroll('events', pane, previousScrollTop);
+    }
+}
+
+async function refreshEvents() {
+    if (eventsRequestInFlight) return;
+    eventsRequestInFlight = true;
+    try {
+        const payload = matchJson(await exec(`${CLI} events --json --tail=50`), { array: true });
+        if (!payload || payload === logState.events.lastPayload) return;
+        logState.events.items = JSON.parse(payload);
+        logState.events.lastPayload = payload;
+        if (activeLogView === 'events') {
+            renderEventsPane();
+            updateLogMeta();
+            updateStatusBar();
+        }
+    } catch (error) {
+        console.error('Events refresh error:', error);
+    } finally {
+        eventsRequestInFlight = false;
+    }
+}
+
+function renderTextLog(view, forceBottom = false) {
+    const pane = getLogPane(view);
+    const previousScrollTop = pane.scrollTop;
+    const state = logState[view];
+    const nextText = state.loaded ? (state.text || t('logs.runtime_empty')) : t('logs.loading_runtime');
+    if (updatePaneContent(pane, nextText) || forceBottom) {
+        syncLogPaneScroll(view, pane, previousScrollTop, forceBottom);
+    }
+}
+
+async function refreshTextLog(view) {
+    if (logRequestInFlight || !isTextLog(view) || activeLogView !== view) return;
+
+    logRequestInFlight = true;
+    try {
+        const res = await exec(`tail -n 80 ${MODDIR}/${LOG_VIEWS[view].file} 2>/dev/null`);
+        const state = logState[view];
+        state.text = String(res.stdout || '').replace(/\r/g, '').trim();
+        state.loaded = true;
+        renderTextLog(view);
+        updateStatusBar();
+    } catch (error) {
+        console.error('Log refresh error:', error);
+    } finally {
+        logRequestInFlight = false;
+    }
+}
+
+function setupScrollTracking() {
+    // Coalesce bursts of scroll events into a single per-frame DOM update so
+    // dragging the log panes stays smooth instead of thrashing layout.
+    let scrollFrame = null;
+    let pendingView = null;
+
+    function flushScroll() {
+        scrollFrame = null;
+        const view = pendingView;
+        pendingView = null;
+        if (!view) return;
+        logState[view].scrolledUp = !isPaneNearBottom(getLogPane(view));
+        updateStatusBar();
+    }
+
+    Object.keys(LOG_VIEWS).forEach((view) => {
+        getLogPane(view).addEventListener('scroll', () => {
+            pendingView = view;
+            if (scrollFrame === null) {
+                scrollFrame = requestAnimationFrame(flushScroll);
+            }
+        }, { passive: true });
+    });
+}
+
+function jumpToBottom() {
+    scrollPaneToBottom(getLogPane(activeLogView));
+    logState[activeLogView].scrolledUp = false;
+    updateStatusBar();
+}
+
+async function clearEventsLog() {
+    if (activeLogView !== 'events' || isLoading) return;
+
+    const button = $('btnClearEvents');
+    button.classList.add('loading');
+    try {
+        await withUiLock('logs.clearing_events', {}, async () => {
+            const res = await exec(`${CLI} events clear`);
+            if (res.errno !== 0) {
+                throw new Error(combineOutput(res) || 'events clear failed');
+            }
+            Object.assign(logState.events, { items: [], lastPayload: '[]', scrolledUp: false });
+            renderEventsPane();
+            updateLogMeta();
+            updateStatusBar();
+            showToast('logs.cleared_events');
+            await refreshEvents();
+        });
+    } catch (error) {
+        showToast('logs.clear_failed', { message: error.message });
+    } finally {
+        button.classList.remove('loading');
+    }
+}
+
+function renderLogView() {
+    Object.entries(LOG_VIEWS).forEach(([view, config]) => {
+        $(config.paneId).classList.toggle('active', activeLogView === view);
+        $(config.tabId).classList.toggle('active', activeLogView === view);
+    });
+    updateLogMeta();
+    updateStatusBar();
+}
+
+function startLogPolling() {
+    if (logInterval) clearInterval(logInterval);
+    logInterval = setInterval(() => {
+        if (!document.hidden) refreshTextLog(activeLogView);
+    }, LOG_POLL_MS);
+    updateStatusBar();
+}
+
+function stopLogPolling() {
+    if (logInterval) {
+        clearInterval(logInterval);
+        logInterval = null;
+    }
+    updateStatusBar();
+}
+
+function startEventsPolling() {
+    if (eventsInterval) return;
+    eventsInterval = setInterval(() => {
+        if (!document.hidden) refreshEvents();
+    }, EVENTS_POLL_MS);
+}
+
+function stopEventsPolling() {
+    if (eventsInterval) {
+        clearInterval(eventsInterval);
+        eventsInterval = null;
+    }
+}
+
+function syncLogPolling() {
+    const onLogs = activePage === 'logs' && !document.hidden;
+    if (onLogs && isTextLog(activeLogView)) startLogPolling(); else stopLogPolling();
+    if (onLogs && activeLogView === 'events') startEventsPolling(); else stopEventsPolling();
+}
+
+async function refreshActiveLogView() {
+    if (activePage !== 'logs') return;
+
+    if (!isTextLog(activeLogView)) {
+        await refreshEvents();
+        return;
+    }
+    if (!logState[activeLogView].loaded) {
+        renderTextLog(activeLogView, true);
+    }
+    await refreshTextLog(activeLogView);
+}
+
+async function setLogView(view) {
+    activeLogView = view;
+    renderLogView();
+    syncLogPolling();
+    await refreshActiveLogView();
+}
+
+// ---- Pages and rendering ----
+function renderPages() {
+    Object.entries(PAGE_VIEWS).forEach(([page, config]) => {
+        $(config.pageId).classList.toggle('active', activePage === page);
+        $(config.buttonId).classList.toggle('active', activePage === page);
+    });
+    syncLogPolling();
+}
+
+async function refreshActivePageData(force = false) {
+    if (activePage === 'tools') {
+        await loadUserList(force);
+        await loadTgConfig(force);
+    } else if (activePage === 'logs') {
+        await refreshActiveLogView();
+    }
+}
+
+async function setPage(page) {
+    activePage = page;
+    renderPages();
+    await refreshActivePageData();
+}
+
+function rerenderNonLogUi() {
+    applyStaticTranslations(document, { default_hostname: getPrivateDnsDefaultHostname() });
+    document.querySelectorAll('[data-locale]').forEach((button) => {
+        button.classList.toggle('active', button.dataset.locale === getLocale());
+    });
+    if (uiLockState.locked) renderUiLock();
+    if ($('toast').classList.contains('show')) renderToast();
+    renderRuntimePageUi();
+    renderToolsPageUi();
+}
+
+function rerenderAppUi() {
+    rerenderNonLogUi();
+    renderTextLog('runtime');
+    renderTextLog('nztg');
+    renderEventsPane();
+    renderLogView();
 }
 
 function setupLocaleControls() {
     document.querySelectorAll('[data-locale]').forEach((button) => {
-        if (button.dataset.bound === '1') return;
-        button.dataset.bound = '1';
         button.addEventListener('click', () => {
-            changeLocale(button.dataset.locale || 'ru');
+            setLocale(button.dataset.locale || 'ru');
+            rerenderAppUi();
         });
     });
-    updateLocaleButtons();
 }
 
 document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
-        handleWebUiActivated();
+        if (!isLoading) refreshStatus(true);
+        refreshActivePageData(true);
     }
     syncLogPolling();
 });
 
-window.doAction = doAction;
-window.setPage = setPage;
-window.setPrivateDnsMode = setPrivateDnsMode;
-window.setPrivateDnsDefault = setPrivateDnsDefault;
-window.applyPrivateDnsHostname = applyPrivateDnsHostname;
-window.reloadUserList = reloadUserList;
-window.addUserListDomain = addUserListDomain;
-window.saveUserList = saveUserList;
-window.saveTgSettings = saveTgSettings;
-window.regenerateTgSecret = regenerateTgSecret;
-window.testCfProxy = testCfProxy;
-window.openInTelegram = openInTelegram;
-window.copyTgLink = copyTgLink;
-window.setLogView = setLogView;
-window.clearEventsLog = clearEventsLog;
-window.runDiagnose = runDiagnose;
-window.toggleDiagnosticsDetails = toggleDiagnosticsDetails;
-window.clearDiagnostics = clearDiagnostics;
-window.jumpToBottom = jumpToBottom;
+Object.assign(window, {
+    doAction,
+    setPage,
+    setPrivateDnsMode,
+    setPrivateDnsDefault,
+    applyPrivateDnsHostname,
+    reloadUserList,
+    addUserListDomain,
+    saveUserList,
+    saveTgSettings,
+    regenerateTgSecret,
+    testCfProxy,
+    openInTelegram,
+    copyTgLink,
+    setLogView,
+    clearEventsLog,
+    runDiagnose,
+    toggleDiagnosticsDetails,
+    clearDiagnostics,
+    jumpToBottom
+});
 
 setupLocaleControls();
 setupScrollTracking();

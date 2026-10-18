@@ -49,7 +49,7 @@ The `nfqws2` binaries, payloads, and routing lists are sourced from the original
 <summary>⚙️ Detailed Network, DNS, and Telegram Logic (for geeks)</summary>
 
 - **Network Stack:** The module always brings up DPI interception for IPv4, and for IPv6 when `ip6tables` (mangle table) is supported on the device. There is no separate mode selector and it is not needed: idle IPv6 rules cost nothing when IPv6 traffic is absent and are ready to protect IPv6 as soon as it comes up later (e.g., on Wi-Fi/cellular handovers). This eliminates the legacy issue where in "IPv4-only mode" traffic (e.g., YouTube or Instagram) would leak over IPv6 past the bypass.
-- **Private DNS:** Initialized once during the first service start. If a valid third-party DNS provider is already configured in "Hostname" mode on the system, it is preserved. In other cases ("Disabled", "Auto", or empty), it defaults to `xbox-dns.ru` (required to bypass DNS blocks for AI services like ChatGPT, Gemini, etc.). Manual DNS changes via CLI or WebUI are saved and not reset on subsequent starts.
+- **Private DNS:** Initialized once during the first service start. If a valid third-party DNS provider is already configured in "Hostname" mode on the system, it is preserved. In other cases ("Disabled", "Auto", or empty), it defaults to `geohide.ru` (required to bypass DNS blocks for AI services like ChatGPT, Gemini, etc.). Manual DNS changes via CLI or WebUI are saved and not reset on subsequent starts.
 - **Telegram Proxy (nztgproxy):** A local Go-based MTProto proxy (static, CGO-free `nztg` binary). It accepts incoming MTProto connections from the Telegram client, decodes the obfuscated handshake, and bridges traffic to the official Telegram DCs over WSS (WebSocket-over-TLS) to bypass DPI IP blocks. Supports direct TCP fallback and Cloudflare Worker / CDN fronting (CF proxy) to route traffic through the Cloudflare network if the direct WebSocket server IPs of Telegram are blocked by the ISP.
 
 </details>
@@ -98,7 +98,7 @@ Managing via CLI requires root privileges (`su`). If the `nzapret` command is no
 | `nzapret update` | Download and update bypass lists (hostlists) |
 | `nzapret network status` | Show active firewall stack (IPv4 / IPv4 + IPv6) |
 | `nzapret dns status` | Show current state of Android Private DNS |
-| `nzapret dns set default` | Set default DNS (`xbox-dns.ru`) |
+| `nzapret dns set default` | Set default DNS (`geohide.ru`) |
 | `nzapret dns set auto` | Revert to system auto DNS mode |
 | `nzapret dns set off` | Fully disable system Private DNS |
 | `nzapret dns set hostname <host>` | Set custom DNS provider host |

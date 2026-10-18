@@ -23,7 +23,6 @@
     --orange: #ffab40;
     --orange-bg: rgba(255, 171, 64, 0.1);
     --caution: #ffd54a;
-    --caution-bg: rgba(255, 213, 74, 0.12);
     --caution-glow: rgba(255, 213, 74, 0.22);
     --cyan-bg: rgba(0, 229, 255, 0.1);
     --text-primary: #e8eaf6;
@@ -64,7 +63,6 @@
         --orange: #ef6c00;
         --orange-bg: rgba(239, 108, 0, 0.08);
         --caution: #d49a00;
-        --caution-bg: rgba(212, 154, 0, 0.12);
         --caution-glow: rgba(212, 154, 0, 0.18);
         --cyan-bg: rgba(0, 172, 193, 0.08);
         --text-primary: #1a1c25;
@@ -722,7 +720,7 @@ body.ui-busy .icon-btn {
     color: rgba(255, 255, 255, 0.74);
 }
 
-.network-mode-grid .profile-item-meta {
+.private-dns-grid .profile-item-meta {
     white-space: normal;
     line-height: 1.4;
 }
