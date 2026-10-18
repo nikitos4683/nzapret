@@ -10,8 +10,9 @@ const translations = {
             language: 'Язык интерфейса'
         },
         nav: {
-            runtime: 'Статус',
-            tools: 'Настройки',
+            overview: 'Обзор',
+            domains: 'Домены',
+            telegram: 'Telegram',
             logs: 'Логи'
         },
         common: {
@@ -24,6 +25,12 @@ const translations = {
             applying_changes: 'Применение изменений...',
             unknown: 'неизвестно',
             remove_domain: 'Удалить домен'
+        },
+        hero: {
+            eyebrow: 'Обход DPI'
+        },
+        overview: {
+            lists_title: 'Списки и правила'
         },
         status: {
             checking: 'Проверка...',
@@ -38,9 +45,9 @@ const translations = {
             labels: {
                 private_dns: 'Частный DNS',
                 telegram: 'Telegram',
-                domains: 'Домены',
-                google_domains: 'Google домены',
-                personal_domains: 'Личные домены',
+                domains: 'Домены реестра',
+                google_domains: 'Google',
+                personal_domains: 'Личные',
                 ipv4_rules: 'Правила IPv4',
                 ipv6_rules: 'Правила IPv6'
             }
@@ -49,7 +56,7 @@ const translations = {
             start: 'Старт',
             stop: 'Стоп',
             restart: 'Перезапуск',
-            update: 'Обновить',
+            update: 'Обновить списки',
             starting: 'Запуск nzapret...',
             stopping: 'Остановка nzapret...',
             restarting: 'Перезапуск nzapret...',
@@ -57,12 +64,11 @@ const translations = {
             completed: 'Команда {{command}} выполнена'
         },
         user_list: {
-            title: 'Персональный список доменов',
-            subtitle: 'Добавляйте или удаляйте домены, затем нажимайте «Сохранить». Кнопка «Обновить» восстанавливает сохранённый список с устройства, а nfqws2 подхватывает изменения hostlist без перезапуска.',
+            title: 'Личные домены',
+            subtitle: 'Домены, для которых работает обход в дополнение к спискам. Изменения подхватываются без перезапуска.',
             empty: 'Персональный список пока пуст. Добавьте домен ниже, чтобы включить его в активный hostlist.',
-            quick_placeholder: 'Введите домен и нажмите Добавить',
-            dirty_none: 'Несохранённых изменений нет.',
-            dirty_unsaved: 'Есть несохранённые изменения. Нажмите «Сохранить», чтобы применить их.',
+            quick_placeholder: 'Добавить домен',
+            dirty_unsaved: 'Есть несохранённые изменения',
             binding_applied: 'Используется текущей конфигурацией.',
             binding_missing: 'Текущая конфигурация пока не ссылается на list-user.txt.',
             binding_unknown: 'Статус конфигурации недоступен.',
@@ -73,19 +79,20 @@ const translations = {
             saving: 'Сохранение персональных доменов...',
             clearing: 'Очистка персональных доменов...',
             saved: 'Персональный список сохранён',
-            cleared: 'Персональный список очищен'
+            cleared: 'Персональный список очищен',
+            new_tag: 'новый'
         },
         tg: {
             title: 'Telegram',
-            subtitle: 'Локальный MTProto-прокси для обхода блокировки Telegram. Подключите клиент кнопкой ниже.',
+            subtitle: 'Локальный MTProto-прокси. Подключите Telegram по ссылке.',
             open: 'Открыть в Telegram',
-            copy_link: 'Копировать ссылку',
+            copy_link: 'Скопировать ссылку',
             regen: 'Сгенерировать новый secret',
-            mtproto_title: 'Подключение MTProto',
+            mtproto_title: 'Подключение',
             host: 'IP-адрес',
             port: 'Порт',
             secret: 'Secret',
-            dc_title: 'Датацентры Telegram (DC → IP)',
+            dc_title: 'Датацентры (DC → IP)',
             dc_hint: 'По одному правилу на строку, формат: номер:IP',
             dc_tooltip: 'Соответствие номера датацентра Telegram (DC) и IP-адреса сервера. Каждая строка: «номер:IP», например 4:149.154.167.220. Прокси по этим правилам направляет трафик к нужным серверам Telegram.\n\nЕсли у вас не работают медиа и работает CF-прокси, то попробуйте убрать строку 2:149.154.167.220',
             cf_title: 'Cloudflare Proxy',
@@ -98,8 +105,7 @@ const translations = {
             cf_test_fail: 'CF-прокси недоступен: {{error}}',
             preresolve_enable: 'Прогрев соединений с DC',
             preresolve_tooltip: 'Заранее открывает пул соединений к каждому датацентру при старте, чтобы Telegram подключался мгновенно. Если прямой путь заблокирован — сразу выбирается запасной маршрут (CF/TCP). Если выключить, пул заполняется при первом подключении.',
-            dirty_none: 'Несохранённых изменений нет.',
-            dirty_pending: 'Есть несохранённые изменения. Нажмите «Сохранить».',
+            dirty_pending: 'Есть несохранённые изменения',
             saving: 'Сохранение настроек Telegram...',
             saving_restart: 'Сохранение и перезапуск...',
             saved: 'Настройки Telegram сохранены',
@@ -113,18 +119,18 @@ const translations = {
             invalid_host: 'Укажите корректный IP-адрес',
             invalid_port: 'Порт должен быть числом 1–65535',
             invalid_dc: 'Неверное правило DC: {{line}}',
-            invalid_domain: 'Некорректный домен'
+            invalid_domain: 'Некорректный домен',
+            performance_title: 'Скорость подключения',
+            status_on: 'Прокси работает · порт {{port}}',
+            status_off: 'Прокси остановлен'
         },
         private_dns: {
             title: 'Частный DNS',
             subtitle_html: 'Управление Частным DNS в системе Android. При первом запуске службы nzapret автоматически установит <code>{{default_hostname}}</code>, если на устройстве ещё не задан другой DNS-провайдер.',
             off_label: 'Выкл',
-            off_meta: 'Отключить Частный DNS для системного резолвера Android.',
             auto_label: 'Авто',
-            auto_meta: 'Позволить Android использовать шифрованный DNS, если он поддерживается текущей сетью.',
-            default_meta: 'Сразу применить провайдера по умолчанию для nzapret.',
             hostname_placeholder: 'dns.example.com',
-            apply_hostname: 'Применить адрес',
+            apply_hostname: 'Применить',
             status_initial: 'Статус Частного DNS появится здесь после первого обновления.',
             status_unavailable: 'Управление Частным DNS недоступно, потому что в этой сборке Android отсутствует команда settings.',
             status_init_pending: 'При первом запуске службы nzapret выставит {{default_hostname}}, если уже не настроен другой DNS-провайдер.',
@@ -146,22 +152,17 @@ const translations = {
         },
         diagnostics: {
             title: 'Диагностика',
-            subtitle: 'Проверьте текущее состояние рантайма до того, как уходить в сырые логи.',
-            run: 'Запустить диагностику',
-            running: 'Диагностика...',
+            subtitle: 'Проверка процессов, правил фаервола и сети.',
+            run: 'Проверить',
+            running: 'Проверка...',
             overlay_running: 'Выполняется диагностика...',
             failed: 'Диагностика завершилась с ошибкой',
             completed: 'Диагностика завершена',
             error: 'Ошибка диагностики: {{message}}',
-            empty_title: 'Снимок диагностики пока не создан',
-            empty_text: 'Запустите проверку, чтобы подтвердить работу процесса, цепочки фаервола и другие показатели работы перед разбором сырых логов.',
-            summary: '{{passed}} · {{failed}} / {{total}}',
-            summary_passed: 'Успешно: {{ok}}',
-            summary_failed: 'С ошибкой: {{fail}}',
-            expanded: 'Подробный список раскрыт',
-            collapsed: 'Подробный список скрыт',
-            show_details: 'Показать детали ({{count}})',
-            hide_details: 'Скрыть детали',
+            empty_text: 'Проверка ещё не запускалась.',
+            summary_failed: 'Ошибок: {{fail}}',
+            show_details: 'Подробнее',
+            hide_details: 'Скрыть',
             names: {
                 process: 'Процесс {{subject}}',
                 userlist_binding: 'Привязка list-user',
@@ -214,10 +215,10 @@ const translations = {
                     fail: 'проверка маршрута завершилась с ошибкой',
                     unavailable: 'недоступно в этой сети'
                 }
-            }
+            },
+            summary_all_ok: 'Все проверки пройдены'
         },
         logs: {
-            title: 'Логи',
             runtime_meta: 'stdout / stderr nfqws2',
             nztg_meta: 'stdout / stderr nztg (Telegram)',
             runtime_tab: 'nfqws2',
@@ -268,8 +269,9 @@ const translations = {
             language: 'Interface language'
         },
         nav: {
-            runtime: 'Runtime',
-            tools: 'Settings',
+            overview: 'Overview',
+            domains: 'Domains',
+            telegram: 'Telegram',
             logs: 'Logs'
         },
         common: {
@@ -282,6 +284,12 @@ const translations = {
             applying_changes: 'Applying changes...',
             unknown: 'unknown',
             remove_domain: 'Remove domain'
+        },
+        hero: {
+            eyebrow: 'DPI bypass'
+        },
+        overview: {
+            lists_title: 'Lists & rules'
         },
         status: {
             checking: 'Checking...',
@@ -296,9 +304,9 @@ const translations = {
             labels: {
                 private_dns: 'Private DNS',
                 telegram: 'Telegram',
-                domains: 'Domains',
-                google_domains: 'Google Domains',
-                personal_domains: 'Personal Domains',
+                domains: 'Registry domains',
+                google_domains: 'Google',
+                personal_domains: 'Personal',
                 ipv4_rules: 'IPv4 Rules',
                 ipv6_rules: 'IPv6 Rules'
             }
@@ -307,7 +315,7 @@ const translations = {
             start: 'Start',
             stop: 'Stop',
             restart: 'Restart',
-            update: 'Update',
+            update: 'Update lists',
             starting: 'Starting nzapret...',
             stopping: 'Stopping nzapret...',
             restarting: 'Restarting nzapret...',
@@ -315,12 +323,11 @@ const translations = {
             completed: '{{command}} completed'
         },
         user_list: {
-            title: 'Personal Domain List',
-            subtitle: 'Add or remove domains, then tap Save. Reload restores the saved list from the device, and nfqws2 will pick hostlist changes up without a restart.',
+            title: 'Personal domains',
+            subtitle: 'Domains bypassed in addition to the lists. Changes apply without a restart.',
             empty: 'No personal domains yet. Add one below to include it in the active hostlist.',
-            quick_placeholder: 'Add one domain, then tap Add',
-            dirty_none: 'No unsaved changes.',
-            dirty_unsaved: 'Unsaved changes. Press Save to apply them.',
+            quick_placeholder: 'Add a domain',
+            dirty_unsaved: 'Unsaved changes',
             binding_applied: 'Applied by the current configuration.',
             binding_missing: 'Current configuration does not reference list-user.txt yet.',
             binding_unknown: 'Configuration status unavailable.',
@@ -331,19 +338,20 @@ const translations = {
             saving: 'Saving personal domains...',
             clearing: 'Clearing personal domains...',
             saved: 'Personal list saved',
-            cleared: 'Personal list cleared'
+            cleared: 'Personal list cleared',
+            new_tag: 'new'
         },
         tg: {
             title: 'Telegram',
-            subtitle: 'Local MTProto proxy to bypass Telegram blocking. Connect your client with the button below.',
+            subtitle: 'Local MTProto proxy. Connect Telegram with the link.',
             open: 'Open in Telegram',
             copy_link: 'Copy link',
             regen: 'Generate a new secret',
-            mtproto_title: 'MTProto connection',
+            mtproto_title: 'Connection',
             host: 'IP address',
             port: 'Port',
             secret: 'Secret',
-            dc_title: 'Telegram datacenters (DC → IP)',
+            dc_title: 'Datacenters (DC → IP)',
             dc_hint: 'One rule per line, format: number:IP',
             dc_tooltip: 'Maps a Telegram datacenter number (DC) to a server IP. Each line is "number:IP", e.g. 4:149.154.167.220. The proxy routes traffic to the right Telegram servers by these rules.\n\nIf media does not load while the CF proxy works, try removing the 2:149.154.167.220 line.',
             cf_title: 'Cloudflare Proxy',
@@ -356,8 +364,7 @@ const translations = {
             cf_test_fail: 'CF proxy unavailable: {{error}}',
             preresolve_enable: 'Warm up DC connections',
             preresolve_tooltip: 'Opens a pool of ready connections to each datacenter at startup so Telegram connects instantly. If the direct path is blocked, the fallback route (CF/TCP) is selected right away. When off, the pool fills on the first connection.',
-            dirty_none: 'No unsaved changes.',
-            dirty_pending: 'Unsaved changes. Press Save.',
+            dirty_pending: 'Unsaved changes',
             saving: 'Saving Telegram settings...',
             saving_restart: 'Saving and restarting...',
             saved: 'Telegram settings saved',
@@ -371,18 +378,18 @@ const translations = {
             invalid_host: 'Enter a valid IP address',
             invalid_port: 'Port must be a number 1–65535',
             invalid_dc: 'Invalid DC rule: {{line}}',
-            invalid_domain: 'Invalid domain'
+            invalid_domain: 'Invalid domain',
+            performance_title: 'Connection speed',
+            status_on: 'Proxy running · port {{port}}',
+            status_off: 'Proxy stopped'
         },
         private_dns: {
             title: 'Private DNS',
             subtitle_html: 'Manage Android system Private DNS. nzapret will initialize <code>{{default_hostname}}</code> on the first service start unless the device already uses another provider hostname.',
             off_label: 'Off',
-            off_meta: 'Disable Private DNS for the Android system resolver.',
             auto_label: 'Automatic',
-            auto_meta: 'Let Android use encrypted DNS when the active network supports it.',
-            default_meta: 'Apply the nzapret default provider hostname right away.',
             hostname_placeholder: 'dns.example.com',
-            apply_hostname: 'Apply Hostname',
+            apply_hostname: 'Apply',
             status_initial: 'Private DNS status will appear here after the first refresh.',
             status_unavailable: 'Private DNS controls are unavailable because the Android settings command is missing on this build.',
             status_init_pending: 'nzapret will initialize {{default_hostname}} on the first service start unless another provider hostname is already configured.',
@@ -404,22 +411,17 @@ const translations = {
         },
         diagnostics: {
             title: 'Diagnostics',
-            subtitle: 'Inspect current runtime state before diving into raw logs.',
-            run: 'Run Diagnose',
-            running: 'Running Diagnose...',
+            subtitle: 'Checks processes, firewall rules and the network.',
+            run: 'Run check',
+            running: 'Checking...',
             overlay_running: 'Running diagnostics...',
             failed: 'Diagnostics failed',
             completed: 'Diagnostics completed',
             error: 'Diagnostics error: {{message}}',
-            empty_title: 'No diagnostic snapshot yet',
-            empty_text: 'Run a health check to confirm the process, firewall chains, and other live signals before chasing raw output.',
-            summary: '{{passed}} · {{failed}} / {{total}}',
-            summary_passed: '{{ok}} passed',
+            empty_text: 'No check has been run yet.',
             summary_failed: '{{fail}} failed',
-            expanded: 'Detailed checklist expanded',
-            collapsed: 'Detailed checklist hidden',
-            show_details: 'Show Details ({{count}})',
-            hide_details: 'Hide Details',
+            show_details: 'Details',
+            hide_details: 'Hide',
             names: {
                 process: '{{subject}} process',
                 userlist_binding: 'list-user binding',
@@ -472,10 +474,10 @@ const translations = {
                     fail: 'route lookup failed',
                     unavailable: 'not available on this network'
                 }
-            }
+            },
+            summary_all_ok: 'All checks passed'
         },
         logs: {
-            title: 'Logs',
             runtime_meta: 'nfqws2 stdout / stderr',
             nztg_meta: 'nztg (Telegram) stdout / stderr',
             runtime_tab: 'nfqws2',

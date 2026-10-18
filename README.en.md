@@ -62,7 +62,7 @@ The `nfqws2` binaries, payloads, and routing lists are sourced from the original
 > **Telegram:** The module includes a built-in local MTProto proxy (`nztgproxy`) to bypass Telegram blocks. After starting the module, open the **Telegram** tab in WebUI and click **"Open in Telegram"** (or copy the link/enter `127.0.0.1:1443` and Secret manually). If Telegram IPs are blocked by the provider, traffic goes through the Cloudflare proxy automatically. If media fails to load, remove the `2:149.154.167.220` line in the DC configuration.
 
 > [!NOTE]
-> **KernelSU WebUI Bug:** Due to KernelSU manager specifics, `nfqws2` and `nztg` processes started *manually* via the **Start** button in WebUI may be terminated by the system when KernelSU is swiped away from recent apps. This bug is fixed in KernelSU-Next (see issue [#1180](https://github.com/KernelSU-Next/KernelSU-Next/issues/1180))! For standard KernelSU, it is recommended to use the **Action** button in the module list or run `nzapret start` in a terminal.
+> **KernelSU WebUI Bug:** Due to KernelSU manager specifics, `nfqws2` and `nztg` processes started *manually* via the power button in WebUI may be terminated by the system when KernelSU is swiped away from recent apps. This bug is fixed in KernelSU-Next (see issue [#1180](https://github.com/KernelSU-Next/KernelSU-Next/issues/1180))! For standard KernelSU, it is recommended to use the **Action** button in the module list or run `nzapret start` in a terminal.
 
 ---
 

@@ -201,7 +201,8 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
 - The WebUI JS is split into ES modules loaded via `<script type="module">`: `app.js` is the stateful controller (owns DOM state, render, `window.*` handlers for inline `onclick`), `cli.js` owns the CLI contract (`CLI`/`MODDIR` constants, `matchJson`, `combineOutput`), `utils.js` holds pure state-free helpers, and `i18n.js` holds translations. Keep CLI command/JSON parsing in `cli.js` and add pure helpers to `utils.js` rather than the controller. New `webroot/*.js` files are packaged automatically via the `webroot` entry in `build.sh`.
 - Keep the UI aligned with actual CLI capabilities instead of adding mock controls.
 - If you add a new operator feature, prefer implementing it in the CLI first and then wiring the UI to it.
-- The runtime status card currently shows:
+- The UI has four bottom-bar pages: Overview (status hero with the power toggle, services, metrics, Private DNS, diagnostics), Domains (personal list), Telegram (proxy link and settings), Logs (nfqws2 / nztg / events).
+- The Overview page currently shows:
   - Private DNS label
   - Telegram status value
   - `domain_count`
@@ -209,6 +210,9 @@ This is not a conventional app repository. Most behavior lives in shell scripts 
   - `user_domain_count`
   - `rules_v4`
   - `rules_v6`
+- Visual design lives in `style.css` tokens (`--surface*`, `--text*`, one `--accent`, semantic `--ok`/`--danger`/`--warn`/`--info`) with a light variant under `prefers-color-scheme`. Icons are an inline SVG sprite in `index.html` (`<use href="#i-...">`). Do not load remote fonts or scripts: the WebUI must render offline and on DPI-restricted networks.
+- Elements whose text is rendered dynamically (status title, log subtitle, notes) must not carry a static `data-i18n` attribute, or every re-translation will overwrite them.
+- Unsaved edits (personal list, Telegram settings) show a sticky save bar and must survive app resume; a resume refresh must not reload a dirty editor from disk.
 - Routing Profile UI is intentionally hidden while only the default profile ships; profile CLI support still exists.
 - There is no Network Stack selector or IP-stack status row: the IPv4/IPv6 firewall stack is auto-determined and reflected only by the `rules_v4`/`rules_v6` counters. Do not add a mode toggle.
 - Event-dot colors are semantic: blue/accent for neutral events, green for enabling/successful additions, red for disabling/errors.

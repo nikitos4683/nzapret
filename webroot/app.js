@@ -28,8 +28,9 @@ const EVENTS_POLL_MS = 5000;
 const TOAST_MS = 2500;
 const FALLBACK_DNS_HOSTNAME = 'geohide.ru';
 const PAGE_VIEWS = {
-    runtime: { pageId: 'pageRuntime', buttonId: 'btnPageRuntime' },
-    tools: { pageId: 'pageTools', buttonId: 'btnPageTools' },
+    overview: { pageId: 'pageOverview', buttonId: 'btnPageOverview' },
+    domains: { pageId: 'pageDomains', buttonId: 'btnPageDomains' },
+    telegram: { pageId: 'pageTelegram', buttonId: 'btnPageTelegram' },
     logs: { pageId: 'pageLogs', buttonId: 'btnPageLogs' }
 };
 // Text views tail a log file; the events view renders structured CLI output.
@@ -39,8 +40,8 @@ const LOG_VIEWS = {
     events: { paneId: 'eventsPane', tabId: 'btnEventsTab' }
 };
 const RUNTIME_ACTIONS = {
-    start: { buttonId: 'btnStart', loadingKey: 'actions.starting' },
-    stop: { buttonId: 'btnStop', loadingKey: 'actions.stopping' },
+    start: { buttonId: 'btnPower', loadingKey: 'actions.starting' },
+    stop: { buttonId: 'btnPower', loadingKey: 'actions.stopping' },
     restart: { buttonId: 'btnRestart', loadingKey: 'actions.restarting' },
     update: { buttonId: 'btnUpdate', loadingKey: 'actions.updating_data' }
 };
@@ -59,7 +60,7 @@ const logState = {
     nztg: { text: '', loaded: false, scrolledUp: false },
     events: { items: [], lastPayload: '', scrolledUp: false }
 };
-let activePage = 'runtime';
+let activePage = 'overview';
 let activeLogView = 'runtime';
 let currentStatus = null;
 let statusViewState = 'checking';
@@ -187,21 +188,36 @@ function getPrivateDnsNote(status = currentStatus) {
     }
 }
 
+// checking | error | on | warn (several nfqws2 PIDs) | off
+function getStatusState(status = currentStatus) {
+    if (!status) return statusViewState === 'checking' ? 'checking' : 'error';
+    if (!status.active) return 'off';
+    return parseInt(status.pid_count || 0, 10) > 1 ? 'warn' : 'on';
+}
+
+function renderTgStatus(status) {
+    const active = Boolean(status && status.tg_active);
+    const port = (status && status.tg_port) || '1443';
+    $('tgConnectCard').dataset.state = !status ? 'unknown' : (active ? 'on' : 'off');
+    setText('tgPageStatus', !status
+        ? '--'
+        : t(active ? 'tg.status_on' : 'tg.status_off', { port }));
+    setText('tgStatusValue', !status
+        ? '--'
+        : (active ? t(status.tg_cf_enabled ? 'status.tg_port_cf' : 'status.tg_port', { port }) : t('status.off')));
+}
+
 function renderStatusCard() {
     const status = currentStatus;
-    const isOn = Boolean(status && status.active);
-    const stateClass = isOn ? 'on' : 'off';
 
-    $('statusCard').className = `card status-card ${isOn ? 'active' : 'inactive'}`;
-    $('statusDot').className = `status-dot ${stateClass}`;
-    $('statusLabel').className = `status-label ${stateClass}`;
+    $('statusCard').dataset.state = getStatusState(status);
     setText('statusLabel', getStatusLabel());
+    renderTgStatus(status);
 
     if (!status) {
         setText('pidBadge', 'nfqws2 --');
         setText('tgPidBadge', 'nztg --');
         setText('privateDnsLabel', '--');
-        setText('tgStatusValue', '--');
         ['rulesV4', 'rulesV6', 'domainCount', 'googleDomainCount', 'userDomainCount']
             .forEach((id) => setText(id, '?'));
         return;
@@ -213,9 +229,6 @@ function renderStatusCard() {
     setText('pidBadge', pidCount > 1 ? `nfqws2 ${pid} +${pidCount - 1}` : `nfqws2 ${pid}`);
     setText('tgPidBadge', `nztg ${status.tg_pid || '--'}`);
     setText('privateDnsLabel', getPrivateDnsDisplayLabel(status));
-    setText('tgStatusValue', status.tg_active
-        ? t(status.tg_cf_enabled ? 'status.tg_port_cf' : 'status.tg_port', { port: status.tg_port || '1443' })
-        : t('status.off'));
     setText('rulesV4', status.rules_v4 ?? 0);
     setText('rulesV6', status.rules_v6 ?? 0);
     setText('domainCount', formatNumber(status.domain_count ?? 0));
@@ -225,11 +238,21 @@ function renderStatusCard() {
 
 function renderRuntimeActionButtons() {
     if (isLoading) return;
-    const isOn = Boolean(currentStatus && currentStatus.active);
-    $('btnStart').classList.toggle('disabled', isOn);
-    $('btnStop').classList.toggle('disabled', !isOn);
-    $('btnRestart').classList.toggle('disabled', !isOn);
-    $('btnUpdate').classList.remove('disabled');
+    const isOn = isServiceOn();
+    const power = $('btnPower');
+    power.dataset.state = isOn ? 'on' : 'off';
+    power.setAttribute('aria-label', t(isOn ? 'actions.stop' : 'actions.start'));
+    power.title = power.getAttribute('aria-label');
+    setButtonDisabled($('btnRestart'), !isOn);
+    setButtonDisabled($('btnUpdate'), false);
+}
+
+function isServiceOn() {
+    return Boolean(currentStatus && currentStatus.active);
+}
+
+function togglePower() {
+    return doAction(isServiceOn() ? 'stop' : 'start');
 }
 
 function renderRuntimePageUi() {
@@ -340,6 +363,7 @@ function renderPrivateDnsControls(status = currentStatus) {
         input.value = hostname || defaultHost;
     }
     input.placeholder = defaultHost;
+    setText('privateDnsDefaultLabel', defaultHost);
 
     document.querySelectorAll('[data-private-dns-mode]').forEach((button) => {
         button.classList.toggle('active', Boolean(activeByMode[button.dataset.privateDnsMode]));
@@ -431,29 +455,31 @@ function renderUserListPane() {
 
     pane.classList.toggle('empty', !userListEntries.length);
     if (!userListEntries.length) {
-        pane.innerHTML = `<div class="user-list-empty">${esc(t('user_list.empty'))}</div>`;
+        pane.innerHTML = `<div class="domain-empty">${esc(t('user_list.empty'))}</div>`;
         return;
     }
 
     const removeLabel = esc(t('common.remove_domain'));
-    pane.innerHTML = userListEntries.map((domain) => `
-        <div class="user-list-item">
-            <div class="event-dot userlist ${saved.has(domain) ? 'saved' : 'pending'}"></div>
-            <div class="event-body">
-                <div class="user-list-domain">${esc(domain)}</div>
-            </div>
+    const newTag = esc(t('user_list.new_tag'));
+    pane.innerHTML = userListEntries.map((domain) => {
+        const pending = !saved.has(domain);
+        return `
+        <div class="domain-row${pending ? ' pending' : ''}">
+            <span class="domain-dot"></span>
+            <span class="domain-name">${esc(domain)}</span>
+            ${pending ? `<span class="domain-tag">${newTag}</span>` : ''}
             <button
-                class="user-list-remove-btn${busy ? ' disabled' : ''}"
+                class="icon-btn ghost${busy ? ' disabled' : ''}"
                 type="button"
                 data-remove-domain="${esc(domain)}"
                 aria-label="${removeLabel}"
                 title="${removeLabel}"
                 ${busy ? 'disabled' : ''}
             >
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                <svg class="i" aria-hidden="true"><use href="#i-x"/></svg>
             </button>
-        </div>
-    `).join('');
+        </div>`;
+    }).join('');
 }
 
 // Only the Add button depends on the quick-add input, so typing does not
@@ -463,8 +489,12 @@ function updateUserListAddButton() {
     setButtonDisabled($('btnAddUserListDomain'), isUserListBusy() || !hasPendingInput);
 }
 
+function isUserListDirty() {
+    return userListEntries.join('\n') !== savedUserListEntries.join('\n');
+}
+
 function updateUserListEditorState() {
-    const isDirty = userListEntries.join('\n') !== savedUserListEntries.join('\n');
+    const isDirty = isUserListDirty();
     const attached = currentStatus && typeof currentStatus.user_list_attached === 'boolean'
         ? currentStatus.user_list_attached
         : null;
@@ -473,8 +503,8 @@ function updateUserListEditorState() {
         : (attached ? 'user_list.binding_applied' : 'user_list.binding_missing');
 
     setText('userListCountBadge', tc('counts.domains', userListEntries.length));
-    setText('userListDirtyNote', t(isDirty ? 'user_list.dirty_unsaved' : 'user_list.dirty_none'));
-    $('userListDirtyNote').classList.toggle('warning', isDirty);
+    setText('userListDirtyNote', t('user_list.dirty_unsaved'));
+    $('userListSaveBar').hidden = !isDirty;
     setText('userListBindingNote', t(bindingKey));
     $('userListBindingNote').classList.toggle('warning', attached === false);
 
@@ -614,7 +644,8 @@ function updateTgDirtyNote() {
     const el = tgInputs();
     const dirty = isTgDirty();
     el.cfDomain.disabled = !el.cfDomainEnabled.checked;
-    setText('tgDirtyNote', t(dirty ? 'tg.dirty_pending' : 'tg.dirty_none'));
+    setText('tgDirtyNote', t('tg.dirty_pending'));
+    $('tgSaveBar').hidden = !dirty;
     setButtonDisabled($('btnSaveTg'), !dirty || isLoading);
 }
 
@@ -794,7 +825,7 @@ function setupTgCard() {
 function renderDiagnoseButton() {
     const button = $('btnDiagnose');
     const loading = button.classList.contains('loading');
-    button.querySelector('.diag-run-btn-label').textContent = t(loading ? 'diagnostics.running' : 'diagnostics.run');
+    button.querySelector('.btn-label').textContent = t(loading ? 'diagnostics.running' : 'diagnostics.run');
 }
 
 function setDiagnoseButtonLoading(loading) {
@@ -861,28 +892,27 @@ function renderDiagnosticsPanel() {
 
     const counts = diagnosticsData.summary || { ok: 0, fail: 0, total: 0 };
     const checks = diagnosticsData.checks || [];
-    const toggleLabel = diagnosticsExpanded
-        ? t('diagnostics.hide_details')
-        : t('diagnostics.show_details', { count: formatNumber(checks.length) });
-    const passed = `<span class="pass-count">${esc(t('diagnostics.summary_passed', { ok: formatNumber(counts.ok) }))}</span>`;
-    const failed = `<span class="fail-count">${esc(t('diagnostics.summary_failed', { fail: formatNumber(counts.fail) }))}</span>`;
-    const summaryText = t('diagnostics.summary', { passed, failed, total: esc(formatNumber(counts.total)) });
+    const allOk = !counts.fail;
+    const toggleLabel = t(diagnosticsExpanded ? 'diagnostics.hide_details' : 'diagnostics.show_details');
+    const clearLabel = esc(t('common.clear'));
 
     summary.innerHTML = `
-        <div class="diag-summary-main">
-            <span class="diag-summary-text">${summaryText}</span>
-            <span class="diag-summary-note">${esc(t(diagnosticsExpanded ? 'diagnostics.expanded' : 'diagnostics.collapsed'))}</span>
+        <div class="diag-score">
+            <span class="diag-score-value ${allOk ? 'ok' : 'fail'}">${esc(formatNumber(counts.ok))}/${esc(formatNumber(counts.total))}</span>
+            <span class="diag-score-text">${esc(allOk ? t('diagnostics.summary_all_ok') : t('diagnostics.summary_failed', { fail: formatNumber(counts.fail) }))}</span>
         </div>
         <div class="diag-summary-actions">
-            <button class="diag-inline-btn" onclick="toggleDiagnosticsDetails()">${esc(toggleLabel)}</button>
-            <button class="diag-inline-btn" onclick="clearDiagnostics()">${esc(t('common.clear'))}</button>
+            <button class="btn btn-ghost btn-sm" type="button" onclick="toggleDiagnosticsDetails()">${esc(toggleLabel)}</button>
+            <button class="icon-btn ghost" type="button" onclick="clearDiagnostics()" aria-label="${clearLabel}" title="${clearLabel}">
+                <svg class="i" aria-hidden="true"><use href="#i-x"/></svg>
+            </button>
         </div>
     `;
 
     checklistShell.hidden = !diagnosticsExpanded;
     checklist.innerHTML = !diagnosticsExpanded ? '' : checks.map((check) => `
         <div class="diag-item">
-            <div class="diag-icon ${check.status}">${check.status === 'ok' ? '✓' : '✗'}</div>
+            <span class="diag-icon ${check.status === 'ok' ? 'ok' : 'fail'}"><svg class="i" aria-hidden="true"><use href="#i-${check.status === 'ok' ? 'check' : 'x'}"/></svg></span>
             <span class="diag-name">${esc(getLocalizedDiagnoseName(check))}</span>
             <span class="diag-detail">${esc(getLocalizedDiagnoseDetail(check))}</span>
         </div>
@@ -936,9 +966,7 @@ function updateLogMeta() {
 function updateStatusBar() {
     const textView = isTextLog(activeLogView);
     const isLive = textView && logInterval !== null;
-    ['logLiveDot', 'logLiveLabel', 'logLiveSep'].forEach((id) => {
-        $(id).hidden = !isLive;
-    });
+    $('logLiveLabel').hidden = !isLive;
     $('btnClearEvents').hidden = textView;
 
     if (textView) {
@@ -1156,8 +1184,10 @@ function renderPages() {
 }
 
 async function refreshActivePageData(force = false) {
-    if (activePage === 'tools') {
-        await loadUserList(force);
+    if (activePage === 'domains') {
+        // A forced refresh (app resume) must not discard unsaved edits.
+        await loadUserList(force && !isUserListDirty());
+    } else if (activePage === 'telegram') {
         await loadTgConfig(force);
     } else if (activePage === 'logs') {
         await refreshActiveLogView();
@@ -1208,6 +1238,7 @@ document.addEventListener('visibilitychange', () => {
 
 Object.assign(window, {
     doAction,
+    togglePower,
     setPage,
     setPrivateDnsMode,
     setPrivateDnsDefault,
